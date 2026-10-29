@@ -25,30 +25,50 @@ public partial class TitleScreen : Control
         var bg = new ColorRect { Color = Assets.C("#0d0f17") };
         bg.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(bg);
-        var center = new CenterContainer();
-        center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(center);
+        // Scrolls when the card is taller than the screen, as on a phone held sideways.
+        var scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        scroll.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(scroll);
+        var center = new CenterContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill, SizeFlagsVertical = SizeFlags.ExpandFill };
+        scroll.AddChild(center);
         var panel = new PanelContainer { CustomMinimumSize = new Vector2(480, 0) };
-        panel.AddThemeStyleboxOverride("panel", Ui.Box("#1f2438f4", "#6a5530", 3, 22));
+        panel.AddThemeStyleboxOverride("panel", Ui.Box("#1f2438f4", "#6a5530", 3, Ui.Touch ? 12 : 22));
         center.AddChild(panel);
-        _card = Ui.VBox(10);
+        _card = Ui.VBox(Ui.Touch ? 6 : 10);
         panel.AddChild(_card);
         Build();
+    }
+
+    // Slide the card up while the on-screen keyboard would cover the name box.
+    public override void _Process(double delta)
+    {
+        if (!Ui.Touch) return;
+        float shift = 0;
+        if (_name.HasFocus())
+        {
+            float bottom = _name.GetGlobalRect().End.Y - Position.Y + 8;
+            shift = Math.Max(0, bottom - (GetViewportRect().Size.Y - Ui.KeyboardHeight(GetTree().Root)));
+        }
+        Position = new Vector2(0, -shift);
     }
 
     private void Build()
     {
         foreach (var c in _card.GetChildren()) c.QueueFree();
         _previews.Clear();
-        var glyph = Ui.Label("風", Ui.Gold, 56);
-        glyph.HorizontalAlignment = HorizontalAlignment.Center;
+        if (!Ui.Touch) // the big glyph doesn't fit a phone held sideways
+        {
+            var glyph = Ui.Label("風", Ui.Gold, 56);
+            glyph.HorizontalAlignment = HorizontalAlignment.Center;
+            _card.AddChild(glyph);
+        }
         var title = Ui.Label("Kingdom of the Winds", Ui.GoldHi, 34);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         title.AddThemeConstantOverride("outline_size", 6);
         title.AddThemeColorOverride("font_outline_color", Colors.Black);
         var sub = Ui.Label("A tile-based RPG of walled towns, rice paddies and mountain spirits", Ui.Muted, 14);
         sub.HorizontalAlignment = HorizontalAlignment.Center;
-        _card.With(glyph, title, sub);
+        _card.With(title, sub);
 
         if (Existing != null)
         {
@@ -61,7 +81,7 @@ public partial class TitleScreen : Control
         dolls.Alignment = BoxContainer.AlignmentMode.Center;
         foreach (var d in new[] { Dir.Down, Dir.Right, Dir.Up, Dir.Left })
         {
-            var box = new DollBox(2.5f) { Facing = d };
+            var box = new DollBox(Ui.Touch ? 1.8f : 2.5f) { Facing = d };
             _previews.Add(box);
             dolls.AddChild(box);
         }
@@ -85,7 +105,7 @@ public partial class TitleScreen : Control
         if (_confirmNew && Existing != null)
             _card.With(Ui.Label($"Starting a new character replaces {Existing.Name}.", Ui.Bad, 14), Ui.Button("Yes, start over", Start, true));
         else _card.AddChild(Ui.Button("Begin your journey", Begin, true));
-        var foot = Ui.Label("Arrow keys or WASD to move · Space to attack · H for help", Ui.Muted, 13);
+        var foot = Ui.Label(Ui.Touch ? "Drag in the lower left to move · 攻 to attack · Help for more" : "Arrow keys or WASD to move · Space to attack · H for help", Ui.Muted, 13);
         foot.HorizontalAlignment = HorizontalAlignment.Center;
         _card.AddChild(foot);
         UpdatePreview();

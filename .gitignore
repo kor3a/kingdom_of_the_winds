@@ -5,3 +5,5 @@ obj/
 *.user
 # Regenerated on every art build
 tools/ArtGen/preview.png
+# iOS and other exports
+build/

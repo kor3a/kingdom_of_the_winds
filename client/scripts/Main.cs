@@ -1,10 +1,17 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Godot;
 using KotW.Shared;
 
 namespace KotW;
 
-// Entry point: title screen, keyboard and mouse input, the game loop and saving.
+// Save file (de)serialisation generated at compile time: iOS builds are compiled ahead of time,
+// where System.Text.Json's reflection mode is switched off.
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(SaveData))]
+internal partial class SaveJson : JsonSerializerContext { }
+
+// Entry point: title screen, keyboard, mouse and touch input, the game loop and saving.
 // The client only turns key presses into World calls; World owns every rule.
 public partial class Main : Node2D
 {
@@ -40,22 +47,39 @@ public partial class Main : Node2D
         _ui = new CanvasLayer { Layer = 5 };
         AddChild(_ui);
         _audio.SetMood("town");
+        Ui.Touch = OS.HasFeature("mobile") || OS.GetCmdlineUserArgs().Contains("--touch");
+        if (Ui.Touch) SetupTouchScreen();
         _shotDir = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--shot="))?[7..];
         if (_shotDir != null) { StartGame(Rules.NewCharacter("Baram", "#f2c9a0", "#1a1a1a", "topknot"), false); return; }
         _title = new TitleScreen { Existing = LoadSave(), OnStart = StartGame };
         _ui.AddChild(_title);
     }
 
+    // Phones pack a lot of pixels into a small screen: scale the whole canvas so text stays readable,
+    // and stretch it to fill the screen whatever its shape.
+    private void SetupTouchScreen()
+    {
+        bool phone = OS.HasFeature("mobile");
+        if (!phone) Input.EmulateTouchFromMouse = true; // --touch on a desktop: the mouse stands in for a finger
+        var root = GetTree().Root;
+        // Aim for the HUD's 13 px text to come out about 11 points tall; desktops preview a phone-sized canvas.
+        float points = root.Size.Y / Math.Max(1f, DisplayServer.ScreenGetScale());
+        int h = phone ? (int)Math.Clamp(points * 1.15f, 420, 720) : 450;
+        root.ContentScaleMode = Window.ContentScaleModeEnum.CanvasItems;
+        root.ContentScaleAspect = Window.ContentScaleAspectEnum.Expand;
+        root.ContentScaleSize = new Vector2I(h * 16 / 9, h);
+    }
+
     private static SaveData? LoadSave()
     {
-        try { return File.Exists(SavePath) ? JsonSerializer.Deserialize<SaveData>(File.ReadAllText(SavePath)) : null; }
+        try { return File.Exists(SavePath) ? JsonSerializer.Deserialize(File.ReadAllText(SavePath), SaveJson.Default.SaveData) : null; }
         catch (Exception e) { GD.PushWarning($"Could not read save: {e.Message}"); return null; }
     }
 
     private void Save()
     {
         if (_world == null || _shotDir != null) return;
-        try { File.WriteAllText(SavePath, JsonSerializer.Serialize(_world.P.ToSave(), new JsonSerializerOptions { WriteIndented = true })); }
+        try { File.WriteAllText(SavePath, JsonSerializer.Serialize(_world.P.ToSave(), SaveJson.Default.SaveData)); }
         catch (Exception e) { GD.PushWarning($"Could not save: {e.Message}"); }
         _saveT = SaveEvery;
     }
@@ -74,7 +98,13 @@ public partial class Main : Node2D
         worldUi.AddChild(_overlay);
         _hud = new Hud { W = _world, Audio = _audio };
         _ui.AddChild(_hud);
-        _hud.Chat("Welcome to the Kingdom of the Winds! Press H for controls.", "level");
+        if (_hud.Pad is { } pad)
+        {
+            pad.OnDir = d => { _tap = d; _fresh = true; };
+            pad.OnAttack = () => _attackFresh = true;
+            pad.OnTarget = () => _world!.CycleTarget();
+        }
+        _hud.Chat($"Welcome to the Kingdom of the Winds! {(Ui.Touch ? "Tap Help" : "Press H")} for controls.", "level");
         if (isNew)
         {
             Save();
@@ -95,9 +125,9 @@ public partial class Main : Node2D
         bool ready = _world.P.MoveT >= 1;
         var input = new TickInput
         {
-            Dir = _held.Count > 0 ? _held[^1] : _tap,
+            Dir = _held.Count > 0 ? _held[^1] : _hud.Pad?.Held ?? _tap,
             Fresh = _fresh,
-            Attack = _attack || _attackFresh,
+            Attack = _attack || _attackFresh || _hud.Pad?.Attacking == true,
             AttackFresh = _attackFresh,
         };
         if (ready) { _tap = null; _fresh = false; }
@@ -118,7 +148,7 @@ public partial class Main : Node2D
             }
         }
         // Keep the player centred in the part of the screen the HUD leaves uncovered.
-        _view.Sync(dt, new Vector2(Hud.SideW / 2f, Hud.BottomH / 2f));
+        _view.Sync(dt, _hud.CameraNudge);
         _overlay.Tick(dt);
         _hud.Tick(dt);
         _saveT -= dt;
@@ -200,6 +230,7 @@ public partial class Main : Node2D
 
     public override void _Notification(int what)
     {
-        if (what == NotificationWMCloseRequest) Save();
+        // Phones rarely quit an app: they send it to the background, and may end it there without warning.
+        if (what == NotificationWMCloseRequest || what == NotificationApplicationPaused) Save();
     }
 }

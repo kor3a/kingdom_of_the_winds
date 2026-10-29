@@ -11,15 +11,19 @@ public partial class Hud : Control
     public World W = null!;
     public AudioBox Audio = null!;
     public LineEdit ChatInput = null!;
+    public TouchControls? Pad; // on-screen controls, on touch screens only
+
+    // Where the camera centres the player: the middle of the area the HUD leaves uncovered.
+    public Vector2 CameraNudge => Ui.Touch ? Vector2.Zero : new Vector2(SideW / 2f, BottomH / 2f);
 
     private RichTextLabel _chat = null!;
     private Label _name = null!, _class = null!, _gold = null!, _zone = null!, _coords = null!, _buffs = null!;
     private Label _tName = null!, _tLevel = null!, _tStatus = null!, _tEmpty = null!;
     private StatBar _hp = null!, _mp = null!, _exp = null!, _tBar = null!;
     private Button _statsBtn = null!, _musicBtn = null!;
-    private HBoxContainer _hotbar = null!;
+    private Container _hotbar = null!;
     private Minimap _minimap = null!;
-    private Control _windows = null!;
+    private Control _safe = null!, _windows = null!, _target = null!, _chatPanel = null!;
     private Label _banner = null!;
     private double _bannerT, _refreshT;
     private string _hotbarSig = "", _lastWarn = "";
@@ -33,12 +37,17 @@ public partial class Hud : Control
         Theme = Ui.MakeTheme();
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Ignore;
-        BuildSide();
-        BuildBottom();
+        // Everything sits inside the screen's safe area, clear of a phone's notch and home bar.
+        _safe = new Control { MouseFilter = MouseFilterEnum.Ignore };
+        _safe.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        AddChild(_safe);
+        MakeWidgets();
+        if (Ui.Touch) BuildTouch();
+        else { BuildSide(); BuildBottom(); }
         _windows = new Control { MouseFilter = MouseFilterEnum.Ignore };
         _windows.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        _windows.OffsetRight = -SideW; _windows.OffsetBottom = -BottomH;
-        AddChild(_windows);
+        if (!Ui.Touch) { _windows.OffsetRight = -SideW; _windows.OffsetBottom = -BottomH; }
+        _safe.AddChild(_windows);
         _banner = Ui.Label("", Ui.GoldHi, 30);
         _banner.HorizontalAlignment = HorizontalAlignment.Center;
         _banner.AddThemeConstantOverride("outline_size", 8);
@@ -50,26 +59,20 @@ public partial class Hud : Control
     }
 
     // ---- layout -----------------------------------------------------------------------
-    private void BuildSide()
+    // The widgets are the same on every screen; BuildSide/BuildBottom and BuildTouch only arrange them.
+    private void MakeWidgets()
     {
-        var panel = new PanelContainer();
-        panel.AnchorLeft = 1; panel.AnchorRight = 1; panel.AnchorBottom = 1;
-        panel.OffsetLeft = -SideW;
-        AddChild(panel);
-        var v = Ui.VBox(7);
-        panel.AddChild(v);
-        _name = Ui.Label("", Ui.GoldHi, 19);
+        _name = Ui.Label("", Ui.GoldHi, Ui.Touch ? 16 : 19);
         _class = Ui.Label("");
         _buffs = Ui.Label("", Assets.C("#f0c8ff"), 17);
         _hp = new StatBar { Fill = Assets.C("#d84838") };
         _mp = new StatBar { Fill = Assets.C("#3a78d8") };
         _exp = new StatBar { Fill = Assets.C("#c8a028") };
         _gold = Ui.Label("", Ui.GoldHi);
-        v.With(_name, _class, _buffs, Row("HP", _hp), Row("MP", _mp), Row("EXP", _exp), _gold);
 
         var target = new PanelContainer();
         target.AddThemeStyleboxOverride("panel", Ui.Box("#0c0e16", "#3a3020", 1, 6));
-        target.CustomMinimumSize = new Vector2(0, 78);
+        target.CustomMinimumSize = new Vector2(0, Ui.Touch ? 0 : 78);
         var tv = Ui.VBox(2);
         _tEmpty = Ui.Label("No target · Tab to select", Ui.Muted, 14);
         _tName = Ui.Label("", Assets.C("#ffb0a0"));
@@ -77,23 +80,123 @@ public partial class Hud : Control
         _tBar = new StatBar { Fill = Assets.C("#d84838") };
         _tStatus = Ui.Label("", Assets.C("#b0e890"), 13);
         target.AddChild(tv.With(_tEmpty, _tName, _tLevel, _tBar, _tStatus));
+        _target = target;
         _zone = Ui.Label("", Assets.C("#90e0ff"), 15);
         _minimap = new Minimap { CustomMinimumSize = new Vector2(0, 150) };
         _coords = Ui.Label("", Ui.Muted, 13);
-        v.With(target, _zone, _minimap, _coords);
 
-        var menu = new GridContainer { Columns = 2 };
+        _chat = new RichTextLabel { BbcodeEnabled = true, ScrollFollowing = true, SizeFlagsVertical = SizeFlags.ExpandFill, SelectionEnabled = !Ui.Touch };
+        _chat.AddThemeFontSizeOverride("normal_font_size", Ui.Touch ? 12 : 14);
+        ChatInput = new LineEdit
+        {
+            PlaceholderText = Ui.Touch ? "Tap to chat  ·  /s shout  ·  /w name whisper" : "Press Enter to chat  ·  /s shout  ·  /w name whisper  ·  /who",
+            MaxLength = 120,
+        };
+        ChatInput.TextSubmitted += text =>
+        {
+            if (text.Trim() != "") W.Say(text);
+            ChatInput.Text = "";
+            ChatInput.ReleaseFocus();
+        };
+    }
+
+    private GridContainer Menu(int columns)
+    {
+        var menu = new GridContainer { Columns = columns };
         menu.AddThemeConstantOverride("h_separation", 4);
         menu.AddThemeConstantOverride("v_separation", 4);
+        Button Add(string key, string label, Action a)
+        {
+            var b = Ui.Button(Ui.Touch ? label : $"[{key}] {label}", a);
+            b.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            if (Ui.Touch) { b.CustomMinimumSize = new Vector2(0, 30); b.AddThemeFontSizeOverride("font_size", 13); }
+            menu.AddChild(b);
+            return b;
+        }
+        Add("I", "Bag", () => Toggle("inventory"));
+        _statsBtn = Add("C", "Stats", () => Toggle("stats"));
+        Add("K", "Skills", () => Toggle("skills"));
+        Add("Q", "Quests", () => Toggle("quests"));
+        Add("H", "Help", () => Toggle("help"));
+        _musicBtn = Add("M", "Music", ToggleMusic);
+        return menu;
+    }
+
+    private void BuildSide()
+    {
+        var panel = new PanelContainer();
+        panel.AnchorLeft = 1; panel.AnchorRight = 1; panel.AnchorBottom = 1;
+        panel.OffsetLeft = -SideW;
+        _safe.AddChild(panel);
+        var v = Ui.VBox(7);
+        panel.AddChild(v);
+        v.With(_name, _class, _buffs, Row("HP", _hp), Row("MP", _mp), Row("EXP", _exp), _gold);
+        v.With(_target, _zone, _minimap, _coords);
+        var menu = Menu(2);
         menu.SizeFlagsVertical = SizeFlags.ShrinkEnd | SizeFlags.Expand;
-        Button Menu(string label, Action a) { var b = Ui.Button(label, a); b.SizeFlagsHorizontal = SizeFlags.ExpandFill; menu.AddChild(b); return b; }
-        Menu("[I] Bag", () => Toggle("inventory"));
-        _statsBtn = Menu("[C] Stats", () => Toggle("stats"));
-        Menu("[K] Skills", () => Toggle("skills"));
-        Menu("[Q] Quests", () => Toggle("quests"));
-        Menu("[H] Help", () => Toggle("help"));
-        _musicBtn = Menu("[M] Music", ToggleMusic);
         v.AddChild(menu);
+    }
+
+    // Phones: small panels in the top corners, the on-screen controls along the bottom and the chat between them.
+    private void BuildTouch()
+    {
+        var status = new PanelContainer { CustomMinimumSize = new Vector2(210, 0), OffsetLeft = 4, OffsetTop = 4, OffsetRight = 4, OffsetBottom = 4 };
+        status.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336d8", "#6a5530", 2, 6));
+        status.AddChild(Ui.VBox(3).With(Ui.HBox(8).With(_name, _class), _buffs, Row("HP", _hp), Row("MP", _mp), Row("EXP", _exp), _gold));
+        _safe.AddChild(status);
+
+        _target.AnchorLeft = 0.5f; _target.AnchorRight = 0.5f;
+        _target.OffsetLeft = -110; _target.OffsetRight = 110; _target.OffsetTop = 4; _target.OffsetBottom = 4;
+        _safe.AddChild(_target);
+
+        var map = new PanelContainer
+        {
+            CustomMinimumSize = new Vector2(170, 0), AnchorLeft = 1, AnchorRight = 1,
+            OffsetLeft = -4, OffsetRight = -4, OffsetTop = 4, OffsetBottom = 4, GrowHorizontal = GrowDirection.Begin,
+        };
+        map.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336d8", "#6a5530", 2, 6));
+        _minimap.CustomMinimumSize = new Vector2(0, 84);
+        _coords.Visible = false;
+        map.AddChild(Ui.VBox(3).With(_minimap, _zone, _coords, Menu(3)));
+        _safe.AddChild(map);
+
+        // Hotbar in two rows of four, just left of the attack button.
+        var grid = new GridContainer
+        {
+            Columns = 4, AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = -TouchControls.ClusterW, OffsetRight = -TouchControls.ClusterW,
+            OffsetTop = -TouchControls.Edge, OffsetBottom = -TouchControls.Edge,
+            GrowHorizontal = GrowDirection.Begin, GrowVertical = GrowDirection.Begin,
+        };
+        grid.AddThemeConstantOverride("h_separation", 5);
+        grid.AddThemeConstantOverride("v_separation", 5);
+        _hotbar = grid;
+        _safe.AddChild(grid);
+
+        const float hotbarW = 4 * 46 + 3 * 5;
+        _chatPanel = new PanelContainer
+        {
+            AnchorTop = 1, AnchorBottom = 1, AnchorRight = 1, GrowVertical = GrowDirection.Begin,
+            OffsetLeft = TouchControls.StickW + 8, OffsetRight = -(TouchControls.ClusterW + hotbarW + 12),
+        };
+        _chatPanel.AddThemeStyleboxOverride("panel", Ui.Box("#151827c0", "#6a5530", 1, 4));
+        _chat.CustomMinimumSize = new Vector2(0, 62);
+        _chatPanel.AddChild(Ui.VBox(2).With(_chat, ChatInput));
+        _safe.AddChild(_chatPanel);
+
+        Pad = new TouchControls { Hotbar = _hotbar, Blocked = at => _open.Values.Any(w => w.GetGlobalRect().HasPoint(at)), OnSlot = i => W.UseHotbar(i) };
+        _safe.AddChild(Pad);
+    }
+
+    // Follow the safe area, and lift the chat above the on-screen keyboard while typing.
+    private void FitScreen()
+    {
+        var root = GetTree().Root;
+        var (side, top, bottom) = Ui.SafeMargins(root);
+        _safe.OffsetLeft = side; _safe.OffsetRight = -side; _safe.OffsetTop = top; _safe.OffsetBottom = -bottom;
+        float lift = Math.Max(TouchControls.Edge, Ui.KeyboardHeight(root) - bottom);
+        _chatPanel.OffsetBottom = -lift;
+        _chatPanel.OffsetTop = -lift;
     }
 
     private static Control Row(string label, StatBar bar)
@@ -110,25 +213,16 @@ public partial class Hud : Control
         var bottom = Ui.VBox(4);
         bottom.AnchorTop = 1; bottom.AnchorBottom = 1; bottom.AnchorRight = 1;
         bottom.OffsetTop = -BottomH; bottom.OffsetRight = -SideW - 4;
-        AddChild(bottom);
+        _safe.AddChild(bottom);
         var hotPanel = new PanelContainer();
         hotPanel.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336f2", "#6a5530", 2, 4));
-        _hotbar = Ui.HBox(5);
-        _hotbar.Alignment = BoxContainer.AlignmentMode.Center;
-        hotPanel.AddChild(_hotbar);
+        var hotbar = Ui.HBox(5);
+        hotbar.Alignment = BoxContainer.AlignmentMode.Center;
+        _hotbar = hotbar;
+        hotPanel.AddChild(hotbar);
         var chatPanel = new PanelContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
         chatPanel.AddThemeStyleboxOverride("panel", Ui.Box("#151827f2", "#6a5530", 2, 5));
-        var cv = Ui.VBox(3);
-        _chat = new RichTextLabel { BbcodeEnabled = true, ScrollFollowing = true, SizeFlagsVertical = SizeFlags.ExpandFill, SelectionEnabled = true };
-        _chat.AddThemeFontSizeOverride("normal_font_size", 14);
-        ChatInput = new LineEdit { PlaceholderText = "Press Enter to chat  ·  /s shout  ·  /w name whisper  ·  /who", MaxLength = 120 };
-        ChatInput.TextSubmitted += text =>
-        {
-            if (text.Trim() != "") W.Say(text);
-            ChatInput.Text = "";
-            ChatInput.ReleaseFocus();
-        };
-        chatPanel.AddChild(cv.With(_chat, ChatInput));
+        chatPanel.AddChild(Ui.VBox(3).With(_chat, ChatInput));
         bottom.With(hotPanel, chatPanel);
     }
 
@@ -187,10 +281,13 @@ public partial class Hud : Control
         _gold.Text = $"● {p.Gold:N0} gold";
         _zone.Text = W.Map.Name;
         _coords.Text = $"{W.Map.Levels} · {p.X}, {p.Y}";
-        _statsBtn.Text = p.Unspent > 0 ? $"[C] Stats +{p.Unspent}" : "[C] Stats";
+        var stats = Ui.Touch ? "Stats" : "[C] Stats";
+        _statsBtn.Text = p.Unspent > 0 ? $"{stats} +{p.Unspent}" : stats;
         _statsBtn.AddThemeColorOverride("font_color", p.Unspent > 0 ? Ui.GoldHi : Ui.Ink);
+        if (Ui.Touch) { _buffs.Visible = _buffs.Text != ""; FitScreen(); }
 
         var t = W.GetTarget();
+        _target.Visible = !Ui.Touch || t != null; // phones have no room for an empty target box
         _tEmpty.Visible = t == null;
         _tName.Visible = _tLevel.Visible = _tBar.Visible = _tStatus.Visible = t != null;
         if (t != null)
@@ -238,7 +335,8 @@ public partial class Hud : Control
                 int idx = i;
                 var s = slots[i];
                 var b = new Button { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(46, 46), ClipContents = true };
-                b.Pressed += () => W.UseHotbar(idx);
+                b.SetMeta("slot", idx);
+                if (!Ui.Touch) b.Pressed += () => W.UseHotbar(idx); // on touch screens Pad presses it, from any finger
                 if (s != null && s.StartsWith("potion:"))
                 {
                     var which = s[7..];
@@ -266,12 +364,16 @@ public partial class Hud : Control
                     b.TooltipText = SkillTip(sk);
                 }
                 else b.Disabled = true;
-                var key = Ui.Label((i + 1).ToString(), Ui.GoldHi, 12);
-                key.Position = new Vector2(3, 0);
-                key.AddThemeConstantOverride("outline_size", 3);
-                key.AddThemeColorOverride("font_outline_color", Colors.Black);
                 var cd = new ColorRect { Color = new Color(0, 0, 0, 0.62f), Name = "cd", MouseFilter = MouseFilterEnum.Ignore };
-                b.With(cd, key);
+                b.AddChild(cd);
+                if (!Ui.Touch)
+                {
+                    var key = Ui.Label((i + 1).ToString(), Ui.GoldHi, 12);
+                    key.Position = new Vector2(3, 0);
+                    key.AddThemeConstantOverride("outline_size", 3);
+                    key.AddThemeColorOverride("font_outline_color", Colors.Black);
+                    b.AddChild(key);
+                }
                 _hotbar.AddChild(b);
             }
         }
@@ -344,6 +446,7 @@ public partial class Hud : Control
         var win = new GameWindow(title, () => Close(id)) { Render = render };
         win.CustomMinimumSize = new Vector2(width, 0);
         _windows.AddChild(win);
+        if (Ui.Touch) top = 4; // short screens need all the height they have
         win.Position = new Vector2(right ? Math.Max(12, _windows.Size.X - width - 12) : 12, top);
         win.ZIndex = 0;
         win.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true }) win.MoveToFront(); };
@@ -385,11 +488,13 @@ public partial class Hud : Control
         foreach (var c in win.Body.GetChildren()) { win.Body.RemoveChild(c); c.QueueFree(); }
         win.Render(win.Body);
         // Shrink to the new contents once the wrapped labels have been laid out.
+        win.FitBody();
         win.Size = Vector2.Zero;
         win.CallDeferred(Control.MethodName.ResetSize);
     }
 
-    private Button Slot(ItemStack? s, string? label, Action<bool, bool>? onClick, bool buying = false)
+    // onHold runs on a long press, which stands in for right-click and Shift on touch screens.
+    private Button Slot(ItemStack? s, string? label, Action<bool, bool>? onClick, bool buying = false, Action? onHold = null)
     {
         var b = new Button { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(44, 44) };
         b.AddThemeStyleboxOverride("normal", Ui.Box("#0c0e16", "#3a3450", 2, 2));
@@ -410,23 +515,83 @@ public partial class Hud : Control
             }
         }
         else if (label != null) { b.Text = label; b.AddThemeFontSizeOverride("font_size", 10); b.AddThemeColorOverride("font_color", Assets.C("#5a5470")); }
+        ulong downAt = 0;
         if (onClick != null)
             b.GuiInput += e =>
             {
-                if (e is InputEventMouseButton { Pressed: true } mb && mb.ButtonIndex is MouseButton.Left or MouseButton.Right)
+                if (e is not InputEventMouseButton mb || mb.ButtonIndex is not (MouseButton.Left or MouseButton.Right)) return;
+                if (Ui.Touch)
                 {
-                    onClick(mb.ButtonIndex == MouseButton.Right, mb.ShiftPressed);
+                    // Act on release: a quick tap clicks, holding for half a second opens the item's details.
+                    if (mb.Pressed) downAt = Time.GetTicksMsec();
+                    else if (downAt > 0)
+                    {
+                        if (Time.GetTicksMsec() - downAt >= 450 && onHold != null) onHold(); else onClick(false, false);
+                        downAt = 0;
+                    }
                     b.AcceptEvent();
+                    return;
                 }
+                if (!mb.Pressed) return;
+                onClick(mb.ButtonIndex == MouseButton.Right, mb.ShiftPressed);
+                b.AcceptEvent();
             };
         return b;
+    }
+
+    // Touch screens have no hover, right button or Shift, so holding an item shows its details and what you can do with it.
+    private void ShowItem(ItemStack s, bool buying, List<(string Label, Action Do)> actions, Action? drop = null)
+    {
+        var it = Content.Items[s.Id];
+        bool sure = false;
+        Open("item", it.Name, body =>
+        {
+            body.AddChild(Ui.Label(ItemTip(it, W.P, buying), null, 14, true));
+            for (int i = 0; i < actions.Count; i++)
+            {
+                var act = actions[i].Do;
+                body.AddChild(Ui.Button(actions[i].Label, () => { act(); Close("item"); }, i == 0));
+            }
+            if (drop != null)
+            {
+                var b = Ui.Button(sure ? "Tap again to throw it away" : "Throw away", () =>
+                {
+                    if (!sure) { sure = true; if (_open.TryGetValue("item", out var w)) Refresh(w, true); return; }
+                    drop();
+                    Close("item");
+                });
+                b.AddThemeColorOverride("font_color", Ui.Bad);
+                body.AddChild(b);
+            }
+            body.AddChild(Ui.Button("Close", () => Close("item")));
+        }, width: 300);
+    }
+
+    private void ShowBagItem(int idx)
+    {
+        if (W.P.Inv[idx] is not { } s) return;
+        var it = Content.Items[s.Id];
+        var actions = new List<(string Label, Action Do)>();
+        if (_shopId != null)
+        {
+            actions.Add(("Sell one", () => W.Sell(idx, false)));
+            if (s.Qty > 1) actions.Add(($"Sell all {s.Qty}", () => W.Sell(idx, true)));
+        }
+        else if (_open.ContainsKey("storage")) actions.Add(("Put in storage", () => W.Deposit(idx)));
+        if (it.IsGear) actions.Add(("Equip", () => W.UseItem(idx)));
+        else if (it.Type == ItemType.Use) actions.Add(("Use", () => W.UseItem(idx)));
+        ShowItem(s, false, actions, () => W.DropItem(idx));
     }
 
     private void RenderInventory(VBoxContainer body)
     {
         var p = W.P;
-        Button Eq(string slot) => Slot(p.Equip[slot] is { } id ? new ItemStack(id) : null,
-            slot switch { "ring1" or "ring2" => "Ring", _ => char.ToUpper(slot[0]) + slot[1..] }, (_, _) => W.Unequip(slot));
+        Button Eq(string slot)
+        {
+            var worn = p.Equip[slot] is { } id ? new ItemStack(id) : null;
+            return Slot(worn, slot switch { "ring1" or "ring2" => "Ring", _ => char.ToUpper(slot[0]) + slot[1..] }, (_, _) => W.Unequip(slot),
+                onHold: worn == null ? null : () => ShowItem(worn, false, new() { ("Take off", () => W.Unequip(slot)) }));
+        }
         var doll = new DollBox(2);
         doll.Doll.SetLook(p.Look);
         var dollRow = Ui.HBox(6);
@@ -445,9 +610,13 @@ public partial class Hud : Control
                 if (!right) { if (_open.ContainsKey("storage")) W.Deposit(idx); else W.UseItem(idx); }
                 else if (_shopId != null) W.Sell(idx, shift);
                 else if (shift) W.DropItem(idx);
-            }));
+            }, onHold: () => ShowBagItem(idx)));
         }
-        string hint = _shopId != null ? "Right-click to sell one, Shift + right-click to sell the stack."
+        string hint = Ui.Touch
+            ? _shopId != null ? "Hold an item to sell it."
+              : _open.ContainsKey("storage") ? "Tap an item to put it in storage. Hold it for details."
+              : "Tap to use or equip. Tap a worn item to take it off. Hold an item for details or to throw it away."
+            : _shopId != null ? "Right-click to sell one, Shift + right-click to sell the stack."
             : _open.ContainsKey("storage") ? "Click an item to put it in storage."
             : "Click to use or equip. Click a worn item to take it off. Shift + right-click throws an item away.";
         body.With(dollRow, bag, Ui.Label($"● {p.Gold:N0} gold", Ui.GoldHi), Ui.Label(hint, Ui.Muted, 13, true));
@@ -533,7 +702,16 @@ public partial class Hud : Control
         var grid = new GridContainer { Columns = 2 };
         grid.AddThemeConstantOverride("h_separation", 14);
         grid.AddThemeConstantOverride("v_separation", 5);
-        foreach (var (k, v) in new[]
+        foreach (var (k, v) in Ui.Touch ? new[]
+        {
+            ("Stick", "Drag in the lower-left corner to walk. Walk into a monster to attack it, into a person to talk."),
+            ("攻", "Attack the tile you face (hold to keep swinging). Talks to a person in front of you."),
+            ("◎ / tap", "Select the next target, or tap a monster. Spells need a target in range."),
+            ("Hotbar", "Class skills (from level 5), then your best healing tonic and mana tea."),
+            ("Menu", "Bag · Stats · Skills · Quests · Help · Music, top right."),
+            ("Hold an item", "See its details, sell it or throw it away."),
+            ("Chat box", "Tap to chat. /s shout, /w name message to whisper, /who"),
+        } : new[]
         {
             ("Arrows / WASD", "Move one tile at a time. Walk into a monster to attack it, into a person to talk."),
             ("Space", "Attack the tile you face (hold to keep swinging). Talks to a person in front of you."),
@@ -623,8 +801,8 @@ public partial class Hud : Control
     private void RenderShop(VBoxContainer body, string shopId)
     {
         var p = W.P;
-        body.AddChild(Ui.Label("Shift-click Buy for 5 consumables. Right-click bag items to sell.", Ui.Muted, 13, true));
-        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(0, 330), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        body.AddChild(Ui.Label(Ui.Touch ? "Tap an item for details. Hold a bag item to sell it." : "Shift-click Buy for 5 consumables. Right-click bag items to sell.", Ui.Muted, 13, true));
+        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(0, Ui.Touch ? 190 : 330), HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
         var list = Ui.VBox(2);
         list.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         foreach (var id in Content.Shops[shopId])
@@ -643,9 +821,19 @@ public partial class Hud : Control
                     buy.AcceptEvent();
                 }
             };
-            var row = Ui.HBox(8).With(icon, name, Ui.Label($"{it.Price}g", Ui.GoldHi, 14), buy);
+            // No Shift on a touch screen, so stackable goods get their own button for five.
+            var five = Ui.Touch && it.Stack ? Ui.Button("×5", () => W.Buy(shopId, id, 5), disabled: p.Gold < it.Price * 5) : null;
+            var row = Ui.HBox(8).With(icon, name, Ui.Label($"{it.Price}g", Ui.GoldHi, 14), buy, five);
             row.TooltipText = ItemTip(it, p, true);
             row.MouseFilter = MouseFilterEnum.Pass;
+            if (Ui.Touch)
+                row.GuiInput += e =>
+                {
+                    if (e is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) return;
+                    var acts = new List<(string Label, Action Do)> { ("Buy one", () => W.Buy(shopId, id, 1)) };
+                    if (it.Stack) acts.Add(("Buy five", () => W.Buy(shopId, id, 5)));
+                    ShowItem(new ItemStack(id), true, acts);
+                };
             list.AddChild(row);
         }
         scroll.AddChild(list);
@@ -666,9 +854,11 @@ public partial class Hud : Control
         for (int j = 0; j < W.P.Storage.Length; j++)
         {
             int idx = j;
-            grid.AddChild(Slot(W.P.Storage[j], null, (_, _) => W.Withdraw(idx)));
+            var s = W.P.Storage[j];
+            grid.AddChild(Slot(s, null, (_, _) => W.Withdraw(idx),
+                onHold: s == null ? null : () => ShowItem(s, false, new() { ("Take back", () => W.Withdraw(idx)) })));
         }
-        body.With(Ui.Label("Click a stored item to take it back. Click bag items to store them.", Ui.Muted, 13, true), grid);
+        body.With(Ui.Label($"{(Ui.Touch ? "Tap" : "Click")} a stored item to take it back. {(Ui.Touch ? "Tap" : "Click")} bag items to store them.", Ui.Muted, 13, true), grid);
     }
 }
 
@@ -678,6 +868,7 @@ public partial class GameWindow : PanelContainer
     public Action<VBoxContainer> Render = _ => { };
     public readonly VBoxContainer Body = Ui.VBox(6);
     public string Sig = "";
+    private readonly ScrollContainer _scroll = new() { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
     private bool _drag;
 
     public GameWindow(string title, Action onClose)
@@ -689,7 +880,7 @@ public partial class GameWindow : PanelContainer
         var titleRow = Ui.HBox();
         var label = Ui.Label(title, Ui.GoldHi, 14);
         label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        var close = new Button { Text = "×", Flat = true, FocusMode = FocusModeEnum.None };
+        var close = new Button { Text = "×", Flat = true, FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(Ui.Touch ? 36 : 0, 0) };
         close.Pressed += onClose;
         bar.AddChild(titleRow.With(label, close));
         bar.GuiInput += e =>
@@ -701,7 +892,23 @@ public partial class GameWindow : PanelContainer
                 Position = new Vector2(Mathf.Clamp(Position.X + mm.Relative.X, 0, Math.Max(0, parent.X - 80)), Mathf.Clamp(Position.Y + mm.Relative.Y, 0, Math.Max(0, parent.Y - 30)));
             }
         };
-        AddChild(outer.With(bar, Body));
+        Body.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _scroll.AddChild(Body);
+        AddChild(outer.With(bar, _scroll));
+    }
+
+    public override void _Process(double delta) => FitBody();
+
+    // Grow with the contents, but scroll rather than run off the bottom of the screen.
+    public void FitBody()
+    {
+        if (GetParent() is not Control parent) return;
+        float chrome = GetCombinedMinimumSize().Y - _scroll.CustomMinimumSize.Y;
+        float room = parent.Size.Y - Position.Y - chrome - 6;
+        float h = Mathf.Max(60, Mathf.Min(Body.GetCombinedMinimumSize().Y, room));
+        if (Mathf.Abs(_scroll.CustomMinimumSize.Y - h) < 0.5f) return;
+        _scroll.CustomMinimumSize = new Vector2(0, h);
+        ResetSize();
     }
 }
 
