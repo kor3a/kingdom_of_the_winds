@@ -10,3 +10,5 @@ tools/ArtGen/preview_monsters.png
 tools/ArtGen/preview_maps.png
 # iOS and other exports
 build/
+# Server secrets (see .env.example)
+.env

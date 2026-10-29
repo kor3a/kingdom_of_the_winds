@@ -29,6 +29,10 @@ project/assembly_name="KotW"
 
 timers/tooltip_delay_sec=0.25
 
+[kotw]
+
+server_url="http://localhost:5080"
+
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0

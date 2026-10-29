@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- Account server: logins and cloud saves. Grows into the Phase 2 game server. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>KotW.Server</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\shared\KotW.Shared.csproj" />
+  </ItemGroup>
+</Project>

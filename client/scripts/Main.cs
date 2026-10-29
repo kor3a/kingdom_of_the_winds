@@ -11,7 +11,8 @@ namespace KotW;
 [JsonSerializable(typeof(SaveData))]
 internal partial class SaveJson : JsonSerializerContext { }
 
-// Entry point: title screen, keyboard, mouse and touch input, the game loop and saving.
+// Entry point: title screen, keyboard, mouse and touch input, the game loop and saving
+// (to the player's account when logged in, otherwise to this device).
 // The client only turns key presses into World calls; World owns every rule.
 public partial class Main : Node2D
 {
@@ -21,9 +22,13 @@ public partial class Main : Node2D
     private Hud _hud = null!;
     private Overlay _overlay = null!;
     private AudioBox _audio = null!;
+    private Cloud _cloud = null!;
     private TitleScreen? _title;
     private CanvasLayer _ui = null!;
     private double _saveT = SaveEvery;
+    private bool _uploading;
+    private SaveData? _nextUpload; // a save made while the last one was still uploading
+    private string? _cloudError; // last upload problem told to the player, so it isn't repeated every minute
     private string? _shotDir; // debug: --shot=<folder> runs a scripted tour and saves screenshots
     private double _shotT;
     private int _shotStep;
@@ -33,6 +38,7 @@ public partial class Main : Node2D
     private bool _fresh, _attack, _attackFresh;
 
     private static string SavePath => ProjectSettings.GlobalizePath("user://save.json");
+    private static string UploadedPath => ProjectSettings.GlobalizePath("user://save.uploaded.json");
 
     private static readonly (Key Key, Dir Dir)[] DirKeys =
     {
@@ -44,6 +50,9 @@ public partial class Main : Node2D
     {
         _audio = new AudioBox();
         AddChild(_audio);
+        _cloud = new Cloud();
+        AddChild(_cloud);
+        GetTree().AutoAcceptQuit = false; // quit only once the last save is uploaded
         _ui = new CanvasLayer { Layer = 5 };
         AddChild(_ui);
         _audio.SetMood("town");
@@ -51,7 +60,7 @@ public partial class Main : Node2D
         if (Ui.Touch) SetupTouchScreen();
         _shotDir = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--shot="))?[7..];
         if (_shotDir != null) { StartGame(Rules.NewCharacter("Baram", "#f2c9a0", "#1a1a1a", "topknot"), false); return; }
-        _title = new TitleScreen { Existing = LoadSave(), OnStart = StartGame };
+        _title = new TitleScreen { Cloud = _cloud, Local = LoadSave(), OnStart = StartGame, OnMovedToAccount = RetireLocalSave };
         _ui.AddChild(_title);
     }
 
@@ -76,12 +85,44 @@ public partial class Main : Node2D
         catch (Exception e) { GD.PushWarning($"Could not read save: {e.Message}"); return null; }
     }
 
+    // Once this device's character is in the account, keep the file as a backup but stop offering it.
+    private static void RetireLocalSave()
+    {
+        try { File.Move(SavePath, UploadedPath, true); }
+        catch (Exception e) { GD.PushWarning($"Could not retire save: {e.Message}"); }
+    }
+
     private void Save()
     {
         if (_world == null || _shotDir != null) return;
-        try { File.WriteAllText(SavePath, JsonSerializer.Serialize(_world.P.ToSave(), SaveJson.Default.SaveData)); }
-        catch (Exception e) { GD.PushWarning($"Could not save: {e.Message}"); }
         _saveT = SaveEvery;
+        var data = _world.P.ToSave();
+        if (_cloud.Active) { _ = Upload(data); return; }
+        try { File.WriteAllText(SavePath, JsonSerializer.Serialize(data, SaveJson.Default.SaveData)); }
+        catch (Exception e) { GD.PushWarning($"Could not save: {e.Message}"); }
+    }
+
+    // One upload at a time; a save made meanwhile goes up next, and a failed one is retried at the next save.
+    private async Task Upload(SaveData data)
+    {
+        if (_uploading) { _nextUpload = data; return; }
+        _uploading = true;
+        for (SaveData? next = data; next != null; next = _nextUpload, _nextUpload = null)
+        {
+            var error = await _cloud.Upload(next);
+            if (error != _cloudError && _hud != null)
+                _hud.Chat(error != null ? $"Not saved to your account: {error}" : "Saving to your account again.", error != null ? "warn" : "info");
+            _cloudError = error;
+        }
+        _uploading = false;
+    }
+
+    private async Task SaveAndQuit()
+    {
+        Save();
+        ulong giveUp = Time.GetTicksMsec() + 5000;
+        while (_uploading && Time.GetTicksMsec() < giveUp) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        GetTree().Quit();
     }
 
     private void StartGame(SaveData data, bool isNew)
@@ -258,6 +299,7 @@ public partial class Main : Node2D
     public override void _Notification(int what)
     {
         // Phones rarely quit an app: they send it to the background, and may end it there without warning.
-        if (what == NotificationWMCloseRequest || what == NotificationApplicationPaused) Save();
+        if (what == NotificationWMCloseRequest) _ = SaveAndQuit();
+        else if (what == NotificationApplicationPaused) Save();
     }
 }
