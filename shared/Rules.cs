@@ -74,6 +74,7 @@ public static class Rules
     public const int BagSize = 24;
     public const int StorageSize = 24;
     public const int PointsPerLevel = 3;
+    public const int MaxName = 12;
     public const int TownSpawnX = 6, TownSpawnY = 8;
     public static readonly Stat[] StatKeys = { Stat.Str, Stat.Dex, Stat.Int, Stat.Wis, Stat.Con };
 
@@ -168,6 +169,13 @@ public static class Rules
         if (it.Classes != null && !Content.ClassLine(p.Cls).Any(it.Classes.Contains))
             return $"Only a {string.Join(" or ", it.Classes.Select(c => Content.Classes[c].Name))} can use {it.Name}.";
         return null;
+    }
+
+    // Character names keep letters, digits, spaces, '-' and '_'.
+    public static string CleanName(string raw)
+    {
+        var name = new string(raw.Where(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-' or '_').ToArray()).Trim();
+        return (name.Length > MaxName ? name[..MaxName] : name).TrimEnd();
     }
 
     public static SaveData NewCharacter(string name, string skin, string hair, string style)

@@ -1,6 +1,6 @@
 # Kingdom of the Winds
 
-A 2D tile-based online RPG prototype, built in C# end to end as the design plan describes: a Godot 4 (.NET) client and one shared rules library, with the .NET server coming in Phase 2. It runs offline for a single player. It covers Phase 0 and Phase 1 of the roadmap, plus the dungeons, quests and storyline from Phase 3, with levels up to 100.
+A 2D tile-based online RPG prototype, built in C# end to end as the design plan describes: a Godot 4 (.NET) client, one shared rules library and a .NET account server. The game runs on the client for a single player; players log in so their character follows them between computers, phones and tablets, or play offline with the save kept on the device. It covers Phase 0 and Phase 1 of the roadmap, plus the dungeons, quests and storyline from Phase 3, with levels up to 100.
 
 ## Run it
 
@@ -15,6 +15,33 @@ From a terminal (Godot isn't on the PATH by default after a winget install):
 dotnet build client/KotW.sln
 "%LOCALAPPDATA%\Microsoft\WinGet\Packages\GodotEngine.GodotEngine.Mono_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64.exe" --path client
 ```
+
+## Accounts and cloud saves
+
+The title screen asks players to log in or create an account (email and password), or to play offline. Logged in, the character is saved to the account instead of the device, so it carries over to every other computer, phone or tablet. A character already saved on the device is offered once after logging in, and continuing moves it to the account (the old file stays behind as `save.uploaded.json`). If the same account is played on two devices at once, the one that loaded the older copy is refused instead of overwriting newer progress, and says so in chat. Character names are unique across accounts.
+
+The account server is in `server/`: ASP.NET Core with PostgreSQL (Npgsql and Dapper). It creates its tables on start. Passwords are stored as salted PBKDF2 hashes, logins are random tokens kept for 90 days from last use (only a hash of each is stored), and each address gets ten login tries a minute.
+
+To run it on your computer with Docker Desktop, copy `.env.example` to `.env` and set a database password in it, then start PostgreSQL and the server together. The server listens on `http://localhost:5080`, which the client uses by default:
+
+```bash
+docker compose up -d --build
+```
+
+`docker compose logs -f server` shows what it's doing, and `docker compose down` stops it (accounts are kept in a Docker volume until `docker compose down -v`).
+
+Without Docker, make a database in your own PostgreSQL and run the server directly; the connection string is in `server/appsettings.json`, or set `ConnectionStrings__Db`:
+
+```bash
+psql -U postgres -c "CREATE USER kotw PASSWORD 'kotw'" -c "CREATE DATABASE kotw OWNER kotw"
+dotnet run --project server
+```
+
+The client finds the server through `kotw/server_url` in `client/project.godot`; for one run, pass `-- --server=<url>`.
+
+**Putting it online.** The same `docker-compose.yml`, with its `https` profile, adds Caddy in front for HTTPS on one VPS, as the design plan suggests. Point a domain at the machine, copy `.env.example` to `.env` and fill it in, then run `docker compose --profile https up -d --build`. Set `kotw/server_url` to `https://<your domain>` before exporting builds for players. iPhones only connect over HTTPS.
+
+The client still decides what happens in the game, so a determined player could edit their own save before it uploads. The server checks that a save is well formed, not that it was earned; that comes when the server runs the game in Phase 2.
 
 ## Mac
 
@@ -45,7 +72,7 @@ The iOS Simulator doesn't work on Apple Silicon Macs with the official Godot 4.7
 
 The app icon is `client/icon.png`, drawn by `tools/ArtGen` with the rest of the art.
 
-C# on iOS is still marked experimental in Godot. The save file is read and written with generated JSON code (`SaveJson` in `Main.cs`), because reflection-based JSON is switched off in ahead-of-time builds.
+C# on iOS is still marked experimental in Godot. The save file and server messages are read and written with generated JSON code (`SaveJson` in `Main.cs`, `ApiJson` in `Cloud.cs`), because reflection-based JSON is switched off in ahead-of-time builds.
 
 ## Layout
 
@@ -60,11 +87,13 @@ shared/        Game rules in plain C#, with no Godot code (the future server com
   Maps.cs      seeded builders for the fifteen zones
   Rules.cs     combat math, stats, level curve, save format
   World.cs     the simulation: inputs in, state and events out
+  Api.cs       account server requests and replies, and the checks both sides share
 client/        Godot 4 project (C#)
-  scripts/     Main (input, loop, saving), GameView (tiles, actors, lights), Hud, Overlay, TitleScreen,
-               TouchControls (on-screen stick and buttons)
+  scripts/     Main (input, loop, saving), GameView (tiles, actors, lights), Hud, Overlay, TitleScreen
+               (log-in and character creation), Cloud (talks to the account server), TouchControls
   shaders/     tint.gdshader colours the grey skin and hair layers
   art/ audio/  generated by tools/ArtGen
+server/        Account server: Program (endpoints), Store (tables, password hashing, login tokens), Dockerfile
 tools/ArtGen/  Draws all the pixel art and synthesizes the sound effects and music
 ```
 
@@ -116,6 +145,6 @@ It first checks the content tables and maps (every ID exists, every portal lands
 
 Arrow keys or WASD to move · Space to attack or talk · Tab to target · 1–8 for skills · 9/0 for potions · I (bag), C (stats), K (skills), Q (quests), H (help), M (music) · Enter to chat (`/s`, `/w name`, `/who`).
 
-Saves go to Godot's user folder (`%APPDATA%\Godot\app_userdata\Kingdom of the Winds\save.json` on Windows, `~/Library/Application Support/Godot/app_userdata/Kingdom of the Winds/save.json` on a Mac) on every map change, every 60 seconds, when you quit and when a phone sends the game to the background.
+Logged in, saves go to the account. Offline, they go to Godot's user folder (`%APPDATA%\Godot\app_userdata\Kingdom of the Winds\save.json` on Windows, `~/Library/Application Support/Godot/app_userdata/Kingdom of the Winds/save.json` on a Mac) Either way the game saves on every map change, every 60 seconds, when you quit (waiting up to five seconds for the upload) and when a phone sends the game to the background.
 
 For debugging, `-- --shot=<folder>` runs a short scripted tour of every zone and saves screenshots to that folder.
