@@ -72,11 +72,12 @@ public partial class GameView : Node2D
                 for (int x = 0; x < map.W; x++)
                 {
                     char c = map.Tile(x, y);
-                    if (c != 't' && c != 'a') continue;
+                    if (c is not ('t' or 'a' or 'y' or 'L' or 'S')) continue;
                     _lights.AddChild(new PointLight2D
                     {
-                        Texture = _lightTex, TextureScale = c == 't' ? 0.75f : 1f, Energy = 0.9f,
-                        Color = new Color(1f, 0.7f, 0.35f), Position = new Vector2(x * T + 16, y * T + 14),
+                        Texture = _lightTex, TextureScale = c is 't' or 'y' or 'L' ? 0.75f : 1f, Energy = c == 'S' ? 0.6f : 0.9f,
+                        Color = c == 'y' ? new Color(1f, 0.45f, 0.6f) : c == 'S' ? new Color(1f, 0.9f, 0.55f) : new Color(1f, 0.7f, 0.35f),
+                        Position = new Vector2(x * T + 16, y * T + 14),
                     });
                 }
         }
@@ -98,9 +99,11 @@ public partial class GameView : Node2D
         Cam.Position = Feet(p) - new Vector2(0, 14);
 
         var map = W.Map;
-        _mod.Color = map.Dark > 0 ? new Color(0.09f, 0.08f, 0.12f) : map.Tint != "" ? new Color(0.86f, 0.95f, 0.88f) : Colors.White;
+        // The zone's colour wash, pulled toward night by its darkness (0.9 is a pitch-black cave).
+        var wash = map.Tint != "" ? Color.FromHtml(map.Tint) : Colors.White;
+        _mod.Color = wash.Lerp(new Color(0.09f, 0.08f, 0.12f), Mathf.Clamp((float)map.Dark / 0.9f, 0, 1));
         if (p.Ghost) _mod.Color *= new Color(0.75f, 0.82f, 1.05f);
-        _playerLight.Visible = map.Dark > 0;
+        _playerLight.Visible = map.Dark >= 0.5;
         _playerLight.Position = Feet(p) - new Vector2(0, 16);
         _playerLight.Energy = 1.1f + Mathf.Sin((float)Time * 7) * 0.04f;
 
@@ -124,7 +127,7 @@ public partial class GameView : Node2D
             if (!_actorMap.TryGetValue(m.Id, out var a)) { a = Actor.ForMonster(m.D); _actors.AddChild(a); _actorMap[m.Id] = a; }
             a.Position = Feet(m);
             bool moving = m.MoveT < 1;
-            bool flier = m.D.Sprite == "bat";
+            bool flier = Fliers.Contains(m.D.Sprite);
             int col = m.AttackAnim > 0 ? 2 : (moving || flier) ? (int)(Time * (flier ? 8 : 6) + m.X) % 2 : 0;
             float bob = flier ? -8 + Mathf.Sin((float)Time * 5 + m.Y) * 2 : 0;
             if (m.AttackAnim > 0)
@@ -147,6 +150,12 @@ public partial class GameView : Node2D
         _fx.QueueRedraw();
     }
 
+    // Sprites that hover and flap instead of walking.
+    private static readonly HashSet<string> Fliers = new()
+    {
+        "bat", "ember_bat", "frost_bat", "wisp", "grave_wisp", "storm_wisp", "water_ghost", "egg_ghost", "thunder_crane", "thunder_roc",
+    };
+
     private static int WalkCol(Entity e)
     {
         if (e.MoveT >= 1 || e.MoveT < 0.05) return 0;
@@ -160,7 +169,8 @@ public partial class GameView : Node2D
         {
             ["slash"] = 0.18, ["fire"] = 0.5, ["ice"] = 0.5, ["holy"] = 0.45, ["paralyze"] = 0.6, ["lightning"] = 0.4,
             ["heal"] = 0.8, ["buff"] = 0.7, ["smoke"] = 0.6, ["whirl"] = 0.35, ["levelup"] = 1.4, ["death"] = 0.55,
-            ["revive"] = 1, ["portal"] = 0.6, ["roar"] = 0.45,
+            ["revive"] = 1, ["portal"] = 0.6, ["roar"] = 0.45, ["arrow"] = 0.3, ["spirit"] = 0.5, ["drain"] = 0.6,
+            ["beam"] = 0.35, ["nova"] = 0.5,
         };
         Effects.Add(new FxItem
         {
@@ -182,7 +192,6 @@ public partial class GameView : Node2D
 public partial class TileLayer : Node2D
 {
     private const int T = Assets.T;
-    private const string ObjectTiles = "TPBrLm"; // trees, bushes, rocks... drawn over the zone's ground
     public GameView View = null!;
 
     public override void _Draw()
@@ -194,14 +203,14 @@ public partial class TileLayer : Node2D
         int x1 = Math.Min(map.W - 1, (int)(r.End.X / T) + 1), y1 = Math.Min(map.H - 1, (int)(r.End.Y / T) + 1);
         int frame = (int)(View.Time * 3) % 4;
         var atlas = Assets.TileAtlas;
-        char ground = map.Id switch { "forest" => 'g', "cave" => 'c', _ => '.' };
+        char ground = map.Ground;
         for (int y = y0; y <= y1; y++)
             for (int x = x0; x <= x1; x++)
             {
                 int variant = (int)(Rnd.Hash2(x, y, map.Id.Length) * 4);
                 char tile = map.Tile(x, y);
                 var dest = new Rect2(x * T, y * T, T, T);
-                if (ObjectTiles.Contains(tile))
+                if (Content.ObjectTiles.Contains(tile))
                     DrawTextureRectRegion(atlas, dest, new Rect2(variant * 4 * T, Assets.TileRow(ground) * T, T, T));
                 DrawTextureRectRegion(atlas, dest, new Rect2((variant * 4 + frame) * T, Assets.TileRow(tile) * T, T, T));
             }
@@ -342,6 +351,59 @@ public partial class FxLayer : Node2D
                 case "whirl":
                     DrawArc(c, 26, k * 10, k * 10 + Mathf.Pi * 1.3f, 20, new Color(1, 0.85f, 0.56f, 1 - k), 3);
                     break;
+                case "arrow":
+                {
+                    var from = new Vector2(e.FromX * T + 16, e.FromY * T + 10);
+                    float q = Mathf.Min(1, k / 0.6f);
+                    var head = from.Lerp(c, q);
+                    var dir = (c - from).Normalized();
+                    if (q < 1)
+                    {
+                        DrawLine(head - dir * 12, head, Assets.C("#8a6038"), 2);
+                        DrawLine(head - dir * 3, head + dir * 2, Assets.C("#e8ecf0"), 3);
+                        DrawLine(head - dir * 12, head - dir * 9, e.Color with { A = 0.9f }, 3);
+                    }
+                    else DrawCircle(c, 3 + (k - 0.6f) * 20, new Color(1, 1, 1, (1 - k) * 2));
+                    break;
+                }
+                case "spirit":
+                case "drain":
+                {
+                    // Wisps fly to the target (spirit) or are pulled out of it back to the caster (drain).
+                    var from = new Vector2(e.FromX * T + 16, e.FromY * T + 8);
+                    var (a, b) = e.Kind == "drain" ? (c, from) : (from, c);
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float q = Mathf.Clamp(k * 1.6f - i * 0.08f, 0, 1);
+                        if (q <= 0 || q >= 1) continue;
+                        var p = a.Lerp(b, Ease(q)) + new Vector2(Mathf.Sin(q * 9 + i * 2 + e.Seed * 6) * 8, Mathf.Cos(q * 7 + i) * 5);
+                        DrawCircle(p, 3.5f - i * 0.4f, e.Color with { A = 1 - q * 0.6f });
+                        DrawCircle(p, 1.5f, new Color(1, 1, 1, 1 - q));
+                    }
+                    if (k > 0.55f) DrawArc(b, 4 + (k - 0.55f) * 30, 0, Mathf.Tau, 20, e.Color with { A = 1 - k }, 2);
+                    break;
+                }
+                case "beam":
+                {
+                    var from = new Vector2(e.FromX * T + 16, e.FromY * T + 16);
+                    float w = 10 * (1 - k);
+                    DrawLine(from, c, e.Color with { A = 0.45f * (1 - k) }, w + 6);
+                    DrawLine(from, c, e.Color with { A = 1 - k }, w);
+                    DrawLine(from, c, new Color(1, 1, 1, 1 - k), Mathf.Max(1, w / 3));
+                    break;
+                }
+                case "nova":
+                {
+                    float r = Ease(k) * (e.R + 0.5f) * T;
+                    DrawArc(c, r, 0, Mathf.Tau, 48, e.Color with { A = 1 - k }, 5);
+                    DrawArc(c, r * 0.8f, 0, Mathf.Tau, 48, new Color(1, 1, 1, (1 - k) * 0.6f), 2);
+                    for (int i = 0; i < 12; i++)
+                    {
+                        float a = i / 12f * Mathf.Tau + e.Seed * 6;
+                        DrawRect(new Rect2(c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r - new Vector2(2, 2), 4, 4), e.Color with { A = 1 - k });
+                    }
+                    break;
+                }
                 case "roar":
                     DrawArc(c, 10 + Ease(k) * (e.R + 0.5f) * T, 0, Mathf.Tau, 40, new Color(1, 0.5f, 0.25f, 1 - k), 4);
                     break;

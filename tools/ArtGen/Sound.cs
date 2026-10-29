@@ -98,6 +98,11 @@ public sealed class Sound
         Make("paralyze", 0.45, s => s.Tone(440, 0.4, "saw", 0.15, 880));
         Make("lightning", 0.55, s => { s.Noise(0.5, 0.8, 5000, 200, "high"); s.Tone(80, 0.4, "saw", 0.25, 40); });
         Make("holy", 0.55, s => { foreach (var f in new[] { 784.0, 988, 1175 }) s.Tone(f, 0.5, "sine", 0.15); });
+        Make("arrow", 0.25, s => { s.Noise(0.18, 0.45, 4000, 1200, "high"); s.Tone(1200, 0.05, "triangle", 0.12, 500); });
+        Make("spirit", 0.6, s => { s.Tone(330, 0.5, "sine", 0.2, 220); s.Tone(494, 0.45, "sine", 0.14, 300, 0.05); s.Noise(0.4, 0.15, 900, 300, "band"); });
+        Make("drain", 0.6, s => { s.Tone(660, 0.5, "sine", 0.2, 220); s.Tone(990, 0.4, "triangle", 0.1, 330, 0.08); });
+        Make("nova", 0.6, s => { s.Noise(0.5, 0.6, 200, 3000, "band"); s.Tone(110, 0.45, "sine", 0.4, 55); });
+        Make("smoke", 0.45, s => s.Noise(0.4, 0.45, 1800, 300, "band"));
         Make("heal", 0.5, s => { foreach (var (f, i) in new[] { 523.0, 659, 784, 1047 }.Select((f, i) => (f, i))) s.Tone(f, 0.3, "sine", 0.2, delay: i * 0.06); });
         Make("buff", 0.5, s => { foreach (var (f, i) in new[] { 392.0, 494, 587 }.Select((f, i) => (f, i))) s.Tone(f, 0.4, "triangle", 0.2, delay: i * 0.03); });
         Make("stealth", 0.45, s => s.Noise(0.4, 0.4, 3000, 300, "high"));

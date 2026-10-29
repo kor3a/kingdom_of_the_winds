@@ -168,6 +168,88 @@ public static class Icons
                 for (int k = 0; k < 3; k++) c.Line(5, 22 - k * 4, 27, 12 + k * 3, k == 1 ? m[2] : m[3]);
                 c.Shaded(6, 18, 3, 6, Pal.Ramp("#e8902c"));
                 break;
+            case "bow":
+                for (int k = 0; k <= 20; k++)
+                {
+                    double t = k / 20.0 * 2 - 1;
+                    c.Ellipse(16 + t * 11 - (1 - t * t) * 6 * 0.7, 16 - t * 11 - (1 - t * t) * 6 * 0.7, 1.3, 1.3, m[2]);
+                }
+                c.Line(5, 27, 27, 5, Pal.Hex("#e8e4d8"));
+                c.Line(9, 13, 13, 9, Pal.Ramp("#4a2c34")[2], 2.4);
+                c.Line(18, 27, 28, 17, Pal.Ramp("#8a6038")[2], 1.2);
+                c.Poly(new (double, double)[] { (27, 15), (30, 16), (29, 19) }, Pal.Ramp("#d8dce0")[2]);
+                break;
+            case "fan":
+                for (int k = 0; k <= 16; k++)
+                {
+                    double t = (k / 16.0 - 0.5) * 2.2 - Math.PI / 2;
+                    c.Line(16 + Math.Cos(t) * 5, 26 + Math.Sin(t) * 5, 16 + Math.Cos(t) * 21, 26 + Math.Sin(t) * 21, k % 4 < 2 ? m[2] : m[3], 1.6);
+                }
+                for (int k = 0; k <= 16; k++) { double t = (k / 16.0 - 0.5) * 2.2 - Math.PI / 2; c.Set(16 + Math.Cos(t) * 20, 26 + Math.Sin(t) * 20, m[1]); }
+                for (int k = 0; k < 5; k++) { double t = (k / 4.0 - 0.5) * 2.2 - Math.PI / 2; c.Line(16, 26, 16 + Math.Cos(t) * 6, 26 + Math.Sin(t) * 6, Pal.Ramp("#5a3a28")[2]); }
+                c.Shaded(16, 26, 1.6, 1.6, gold);
+                break;
+            case "gat":
+                c.Ellipse(16, 22, 14, 4, Pal.Hex("#1c1c22").WithA(220));
+                c.Rect(10, 8, 12, 14, Pal.Hex("#1c1c22")); c.Rect(10, 8, 3, 14, Pal.Hex("#3a3a46")); c.Rect(10, 8, 12, 1, Pal.Hex("#4a4a56"));
+                break;
+            case "root":
+                c.Shaded(16, 12, 5, 7, m, 0.15);
+                c.Line(14, 17, 9, 28, m[2], 2); c.Line(18, 17, 23, 28, m[2], 2); c.Line(16, 18, 16, 29, m[3], 1.6);
+                c.Line(16, 5, 12, 1, Pal.Hex("#4a9a40"), 1.4); c.Line(16, 5, 21, 1, Pal.Hex("#4a9a40"), 1.4);
+                break;
+            case "peach":
+                c.Shaded(16, 18, 10, 9, m, 0.15);
+                c.Line(16, 10, 16, 26, m[1]);
+                c.Shaded(11, 15, 3, 2.5, Pal.Ramp("#f8e0c0"), 0.2);
+                c.Poly(new (double, double)[] { (16, 9), (24, 4), (21, 10) }, Pal.Ramp("#4a9a40")[2]);
+                break;
+            case "coin":
+                c.Shaded(16, 16, 10, 10, m, 0.1);
+                c.Rect(13, 13, 6, 6, m[0]);
+                for (int k = 0; k < 24; k++) { double t = k / 24.0 * Math.PI * 2; c.Set(16 + Math.Cos(t) * 8, 16 + Math.Sin(t) * 8, m[1]); }
+                break;
+            case "claw":
+                c.Shaded(14, 20, 8, 6, m, 0.1);
+                c.Poly(new (double, double)[] { (16, 16), (26, 4), (24, 14) }, m[2]);
+                c.Poly(new (double, double)[] { (10, 15), (12, 3), (17, 12) }, m[3]);
+                break;
+            case "scale":
+                for (int row = 0; row < 3; row++)
+                    for (int col = 0; col < 3; col++) c.Shaded(9 + col * 7 + row % 2 * 3, 10 + row * 6, 4, 4, m, 0.15 - row * 0.05);
+                break;
+            case "charm":
+                c.Rect(10, 6, 12, 20, m[2]); c.Rect(10, 6, 12, 2, m[3]); c.Rect(10, 24, 12, 2, m[1]);
+                c.Line(13, 11, 19, 11, Pal.Hex("#c03030")); c.Line(16, 9, 16, 21, Pal.Hex("#c03030")); c.Line(13, 17, 19, 15, Pal.Hex("#c03030"));
+                c.Line(16, 2, 16, 6, gold[2]);
+                break;
+            case "cloth":
+                c.Poly(new (double, double)[] { (6, 6), (26, 5), (24, 16), (27, 27), (16, 24), (5, 27), (8, 16) }, m[2].WithA(200));
+                c.Line(9, 8, 12, 24, m[3]); c.Line(20, 7, 18, 23, m[1]);
+                break;
+            case "shell":
+                c.Shaded(16, 17, 9, 11, m, 0.2);
+                c.Line(10, 10, 21, 25, m[1]); c.Line(21, 10, 17, 16, m[1]);
+                break;
+            case "dust":
+                c.Shaded(16, 22, 11, 5, m, 0.1);
+                c.Shaded(16, 18, 7, 4, m, 0.2);
+                c.Shaded(12, 10, 2.5, 3, m); c.Shaded(20, 9, 2, 2, m);
+                break;
+            case "feather":
+                c.Line(6, 27, 26, 5, m[1], 1.2);
+                for (int i = 0; i < 9; i++)
+                {
+                    double t = i / 9.0;
+                    double x = 8 + t * 17, y = 25 - t * 19;
+                    c.Line(x, y, x - 6 + t * 3, y - 2, m[2], 1.4); c.Line(x, y, x + 2, y + 6 - t * 3, m[3], 1.4);
+                }
+                break;
+            case "pearl":
+                c.Shaded(16, 16, 10, 10, m, 0.25);
+                c.Shaded(13, 12, 3, 3, Pal.Ramp("#ffffff"), 0.3);
+                c.Line(8, 22, 14, 17, Pal.Hex("#5a8a90")); c.Line(14, 17, 13, 26, Pal.Hex("#5a8a90")); c.Line(18, 8, 21, 14, Pal.Hex("#5a8a90"));
+                break;
             default:
                 c.Shaded(16, 16, 9, 9, m);
                 break;

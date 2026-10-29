@@ -143,7 +143,7 @@ public partial class Main : Node2D
             else if (e.Type == EvType.Map)
             {
                 _view.OnMapChanged();
-                _audio.SetMood(e.Id);
+                _audio.SetMood(_world.Maps[e.Id].Music);
                 if (!e.Initial) Save();
             }
         }
@@ -179,7 +179,30 @@ public partial class Main : Node2D
             (6.4, () => Shot("6_cave")),
             (6.5, () => { w.HurtPlayer(99999); w.EnterMap("town", 19, 9, Dir.Up); w.P.Ghost = true; }),
             (7.3, () => Shot("7_ghost")),
-            (7.4, () => GetTree().Quit()),
+            (7.4, () => { w.P.Ghost = false; w.P.Hp = 99999; w.P.Cls = "windstrider"; w.P.Level = 90; w.P.Equip["weapon"] = "phoenix_bow"; w.P.Equip["armor"] = "windrunner_raiment"; w.EnterMap("harbor", 19, 12, Dir.Down); }),
+            (8.2, () => Shot("8_harbor")),
+            (8.3, () => w.EnterMap("marsh", 23, 12, Dir.Down)),
+            (9.1, () => Shot("9_marsh")),
+            (9.2, () => w.EnterMap("highlands", 23, 20, Dir.Up)),
+            (10.0, () => Shot("10_highlands")),
+            (10.1, () => w.EnterMap("monastery", 19, 14, Dir.Up)),
+            (10.9, () => Shot("11_monastery")),
+            (11.0, () => w.EnterMap("frostpeak", 20, 16, Dir.Right)),
+            (11.8, () => Shot("12_frostpeak")),
+            (11.9, () => w.EnterMap("bamboo", 24, 10, Dir.Down)),
+            (12.7, () => Shot("13_bamboo")),
+            (12.8, () => w.EnterMap("underworld", 24, 33, Dir.Up)),
+            (13.6, () => Shot("14_underworld")),
+            (13.7, () => w.EnterMap("skypalace", 22, 20, Dir.Up)),
+            (14.4, () => { w.CycleTarget(); w.CastSkill("arrow_storm"); }),
+            (14.6, () => Shot("15_skypalace")),
+            (14.7, () => w.EnterMap("eye", 17, 24, Dir.Up)),
+            (15.5, () => Shot("16_eye")),
+            (15.6, () => w.EnterMap("drowned", 20, 14, Dir.Up)),
+            (16.4, () => Shot("17_drowned")),
+            (16.5, () => w.EnterMap("coast", 20, 10, Dir.Down)),
+            (17.3, () => Shot("18_coast")),
+            (17.4, () => GetTree().Quit()),
         };
         while (_shotStep < steps.Length && _shotT >= steps[_shotStep].At) steps[_shotStep++].Do();
     }
@@ -209,8 +232,9 @@ public partial class Main : Node2D
             return;
         }
         if (k.Echo && key != Key.Space) return;
-        if (key >= Key.Key1 && key <= Key.Key8) { _world.UseHotbar((int)(key - Key.Key1)); return; }
-        if (key >= Key.Kp1 && key <= Key.Kp8) { _world.UseHotbar((int)(key - Key.Kp1)); return; }
+        if (key >= Key.Key1 && key <= Key.Key9) { _world.UseHotbar((int)(key - Key.Key1)); return; }
+        if (key >= Key.Kp1 && key <= Key.Kp9) { _world.UseHotbar((int)(key - Key.Kp1)); return; }
+        if (key is Key.Key0 or Key.Kp0) { _world.UseHotbar(9); return; }
         switch (key)
         {
             case Key.Space: if (!k.Echo) _attackFresh = true; _attack = true; break;

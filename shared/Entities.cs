@@ -33,11 +33,13 @@ public sealed class Player : Entity
     public ItemStack?[] Storage = new ItemStack?[Rules.StorageSize];
     public Dictionary<string, string?> Equip = new();
     public Dictionary<string, QuestProgress> Quests = new();
+    public string?[] Bar = new string?[Rules.SkillSlots];
     public string MapId = "town";
     public bool Ghost;
 
     // Runtime only
     public Dictionary<string, double> Buffs = new();
+    public double Barrier; // damage the "barrier" buff still soaks up
     public Dictionary<string, double> Cds = new();
     public double AtkCd, PotCd, HurtFlash, LastCombat = -99, GhostAt;
 
@@ -54,6 +56,7 @@ public sealed class Player : Entity
         };
         for (int i = 0; i < Rules.BagSize; i++) p.Inv[i] = i < d.Inv.Length ? d.Inv[i]?.Clone() : null;
         for (int i = 0; i < Rules.StorageSize; i++) p.Storage[i] = i < d.Storage.Length ? d.Storage[i]?.Clone() : null;
+        for (int i = 0; i < Rules.SkillSlots; i++) p.Bar[i] = d.Bar != null && i < d.Bar.Length && d.Bar[i] is { } id && Content.Skills.ContainsKey(id) ? id : null;
         foreach (var slot in Content.EquipSlots) p.Equip.TryAdd(slot, null);
         p.Place(d.X, d.Y);
         return p;
@@ -63,7 +66,7 @@ public sealed class Player : Entity
     {
         Name = Name, Skin = Skin, Hair = Hair, Style = Style, Cls = Cls, Level = Level, Exp = Exp, Stats = Stats, Unspent = Unspent,
         Hp = Hp, Mp = Mp, Gold = Gold, Inv = Inv.Select(s => s?.Clone()).ToArray(), Equip = new(Equip),
-        Storage = Storage.Select(s => s?.Clone()).ToArray(), Quests = Quests, MapId = MapId, X = X, Y = Y, Facing = Facing, Ghost = Ghost,
+        Storage = Storage.Select(s => s?.Clone()).ToArray(), Quests = Quests, Bar = (string?[])Bar.Clone(), MapId = MapId, X = X, Y = Y, Facing = Facing, Ghost = Ghost,
     };
 }
 

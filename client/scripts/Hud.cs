@@ -160,10 +160,10 @@ public partial class Hud : Control
         map.AddChild(Ui.VBox(3).With(_minimap, _zone, _coords, Menu(3)));
         _safe.AddChild(map);
 
-        // Hotbar in two rows of four, just left of the attack button.
+        // Hotbar in two rows of five, just left of the attack button.
         var grid = new GridContainer
         {
-            Columns = 4, AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            Columns = 5, AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
             OffsetLeft = -TouchControls.ClusterW, OffsetRight = -TouchControls.ClusterW,
             OffsetTop = -TouchControls.Edge, OffsetBottom = -TouchControls.Edge,
             GrowHorizontal = GrowDirection.Begin, GrowVertical = GrowDirection.Begin,
@@ -173,7 +173,7 @@ public partial class Hud : Control
         _hotbar = grid;
         _safe.AddChild(grid);
 
-        const float hotbarW = 4 * 46 + 3 * 5;
+        const float hotbarW = 5 * 46 + 4 * 5;
         _chatPanel = new PanelContainer
         {
             AnchorTop = 1, AnchorBottom = 1, AnchorRight = 1, GrowVertical = GrowDirection.Begin,
@@ -368,7 +368,7 @@ public partial class Hud : Control
                 b.AddChild(cd);
                 if (!Ui.Touch)
                 {
-                    var key = Ui.Label((i + 1).ToString(), Ui.GoldHi, 12);
+                    var key = Ui.Label(((i + 1) % 10).ToString(), Ui.GoldHi, 12);
                     key.Position = new Vector2(3, 0);
                     key.AddThemeConstantOverride("outline_size", 3);
                     key.AddThemeColorOverride("font_outline_color", Colors.Black);
@@ -477,7 +477,7 @@ public partial class Hud : Control
         return string.Join("|", p.Inv.Select(s => s == null ? "" : $"{s.Id}{s.Qty}")) + string.Join(",", p.Equip.Values) + p.Gold + p.Level +
                p.Stats.Str + p.Stats.Dex + p.Stats.Int + p.Stats.Wis + p.Stats.Con + p.Unspent + p.Cls + p.Ghost +
                string.Join(",", p.Quests.Select(q => $"{q.Key}{q.Value.State}{q.Value.Count}")) + string.Join(",", p.Storage.Select(s => s?.Id + s?.Qty)) +
-               string.Join(",", p.Buffs.Keys) + W.Pd.MaxHp;
+               string.Join(",", p.Buffs.Keys) + W.Pd.MaxHp + string.Join(",", p.Bar);
     }
 
     private void Refresh(GameWindow win, bool force = false)
@@ -656,13 +656,17 @@ public partial class Hud : Control
         var p = W.P;
         if (p.Cls == null)
         {
-            body.AddChild(Ui.Label("You have no class skills yet. At level 5, visit the four job masters standing in front of the hall south of the plaza and choose a path:", null, 15, true));
-            foreach (var c in Content.Classes.Values.Where(c => c.Id != "none"))
+            body.AddChild(Ui.Label("You have no class skills yet. At level 5, visit the job masters standing in front of the hall south of the plaza and choose a path:", null, 15, true));
+            foreach (var c in Content.Classes.Values.Where(c => c.Id != "none" && c.Base == null))
                 body.With(Ui.Label($"{c.Name} · {c.Role}", Assets.C(c.Color)), Ui.Label(c.Desc, Ui.Muted, 13, true));
             return;
         }
+        var cls = Content.Classes[p.Cls];
+        var adv = cls.Base == null ? Content.AdvancedOf(p.Cls) : null;
+        var line = Content.ClassLine(p.Cls).Append(adv?.Id).ToArray();
         var learned = W.LearnedSkills();
-        foreach (var s in Content.Skills.Values.Where(s => s.Cls == p.Cls))
+        body.AddChild(Ui.Label("Choose which number key each skill sits on. Keys 9 and 0 drink your best tonic and tea.", Ui.Muted, 13, true));
+        foreach (var s in Content.Skills.Values.Where(s => line.Contains(s.Cls)).OrderBy(s => s.Level))
         {
             bool has = learned.Contains(s.Id);
             var glyph = Ui.Label(s.Glyph, Colors.White, 22);
@@ -672,10 +676,23 @@ public partial class Hud : Control
             var bg = new PanelContainer();
             bg.AddThemeStyleboxOverride("panel", Ui.Box(s.Color, "#1a1410", 2, 0));
             bg.AddChild(glyph);
-            var info = Ui.VBox(1).With(Ui.Label(s.Name + (has ? $"  · key {learned.IndexOf(s.Id) + 1}" : $"  · learn at level {s.Level}"), has ? Colors.White : Ui.Muted),
+            string where = has ? "" : s.Cls == adv?.Id ? $"  · {adv.Name} at level {s.Level}" : $"  · learn at level {s.Level}";
+            var info = Ui.VBox(1).With(Ui.Label(s.Name + where, has ? Colors.White : Ui.Muted),
                 Ui.Label($"{s.Mp} MP · {s.Cd}s · {s.Desc}", Ui.Muted, 13, true));
             info.SizeFlagsHorizontal = SizeFlags.ExpandFill;
             var row = Ui.HBox(8).With(bg, info);
+            if (has)
+            {
+                // A key picker: "-" takes the skill off the bar; picking a used key swaps the two skills.
+                var pick = new OptionButton { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(52, 0), TooltipText = "Hotbar key" };
+                pick.AddItem("–");
+                for (int k = 1; k <= Rules.SkillSlots; k++) pick.AddItem(k.ToString());
+                pick.Selected = Array.IndexOf(p.Bar, s.Id) + 1;
+                string id = s.Id;
+                pick.ItemSelected += i => W.AssignSkill(id, (int)i - 1);
+                pick.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+                row.AddChild(pick);
+            }
             row.Modulate = has ? Colors.White : new Color(1, 1, 1, 0.55f);
             row.TooltipText = SkillTip(s);
             body.AddChild(row);
@@ -684,17 +701,30 @@ public partial class Hud : Control
 
     private void RenderQuests(VBoxContainer body)
     {
-        if (W.P.Quests.Count == 0)
+        var p = W.P;
+        if (p.Quests.Count == 0)
             body.AddChild(Ui.Label("No quests yet. Townsfolk with a ! over their head have work for you. Start with Elder Baek in the plaza.", Ui.Muted, 15, true));
-        foreach (var qid in W.P.Quests.Keys)
+        // Story first, then side quests; finished ones collapse into a count at the bottom.
+        var open = p.Quests.Where(q => q.Value.State != "done").Select(q => Content.Quests[q.Key]).OrderByDescending(q => q.Story).ThenBy(q => q.Level);
+        foreach (var q in open)
         {
-            var q = Content.Quests[qid];
-            var st = W.QuestState(qid);
-            var box = Ui.VBox(2).With(Ui.Label($"{q.Title}  · {Content.Npcs[q.Giver].Name}", st == "done" ? Ui.Muted : Ui.GoldHi),
+            var st = W.QuestState(q.Id);
+            var who = Content.Npcs[q.Ender];
+            var box = Ui.VBox(2).With(Ui.Label($"{(q.Story ? "★ " : "")}{q.Title}  · {Content.Npcs[q.Giver].Name}", q.Story ? Ui.GoldHi : Ui.Ink),
                 Ui.Label(q.Text, Ui.Muted, 13, true),
-                Ui.Label(st == "done" ? "Completed" : st == "ready" ? $"Ready to turn in! ({W.QuestProgress(qid)})" : W.QuestProgress(qid), st == "ready" ? Ui.Good : Ui.GoldHi, 14));
+                Ui.Label(st == "ready" ? $"Ready to turn in to {who.Name} ({W.MapName(who.Map)})" : W.QuestProgress(q.Id), st == "ready" ? Ui.Good : Ui.GoldHi, 14, true));
             body.AddChild(box);
         }
+        var next = Content.Quests.Values.Where(q => q.Story && W.QuestState(q.Id) is "available" or "locked").OrderBy(q => q.Level).FirstOrDefault();
+        if (next != null && !p.Quests.Any(q => Content.Quests[q.Key].Story && q.Value.State != "done"))
+        {
+            var giver = Content.Npcs[next.Giver];
+            body.AddChild(Ui.Label(W.QuestState(next.Id) == "available"
+                ? $"★ The story continues with {giver.Name} in {W.MapName(giver.Map)}."
+                : $"★ The story continues at level {next.Level}, with {giver.Name} in {W.MapName(giver.Map)}.", Ui.GoldHi, 13, true));
+        }
+        int done = p.Quests.Count(q => q.Value.State == "done");
+        if (done > 0) body.AddChild(Ui.Label($"Completed: {done} of {Content.Quests.Count} quests", Ui.Muted, 13));
     }
 
     private void RenderHelp(VBoxContainer body)
@@ -707,7 +737,7 @@ public partial class Hud : Control
             ("Stick", "Drag in the lower-left corner to walk. Walk into a monster to attack it, into a person to talk."),
             ("攻", "Attack the tile you face (hold to keep swinging). Talks to a person in front of you."),
             ("◎ / tap", "Select the next target, or tap a monster. Spells need a target in range."),
-            ("Hotbar", "Class skills (from level 5), then your best healing tonic and mana tea."),
+            ("Hotbar", "Class skills (from level 5), then your best healing tonic and mana tea. Set skill keys in the Skills window."),
             ("Menu", "Bag · Stats · Skills · Quests · Help · Music, top right."),
             ("Hold an item", "See its details, sell it or throw it away."),
             ("Chat box", "Tap to chat. /s shout, /w name message to whisper, /who"),
@@ -716,8 +746,8 @@ public partial class Hud : Control
             ("Arrows / WASD", "Move one tile at a time. Walk into a monster to attack it, into a person to talk."),
             ("Space", "Attack the tile you face (hold to keep swinging). Talks to a person in front of you."),
             ("Tab / click", "Select a target. Spells need a target in range. Esc clears it."),
-            ("1 – 6", "Class skills, unlocked from level 5."),
-            ("7 / 8", "Drink your best healing tonic / mana tea."),
+            ("1 – 8", "Class skills, unlocked from level 5. Pick which key each one sits on in the Skills window (K)."),
+            ("9 / 0", "Drink your best healing tonic / mana tea."),
             ("I · C · K · Q", "Inventory · Character stats · Skills · Quest log"),
             ("Enter", "Chat. /s shout, /w name message to whisper, /who"),
             ("M · H", "Toggle music · This help"),
@@ -727,7 +757,7 @@ public partial class Hud : Control
             desc.CustomMinimumSize = new Vector2(300, 0);
             grid.With(Ui.Label(k, Ui.GoldHi, 14), desc);
         }
-        body.With(grid, Ui.Label("Start by talking to Elder Baek in the plaza, then head out the south gate. At level 5 choose a class from the job masters. If you die you become a ghost: walk to a shrine's golden circle to live again. Progress saves automatically.", Ui.Muted, 14, true));
+        body.With(grid, Ui.Label("Start by talking to Elder Baek in the plaza, then head out the south gate. At level 5 choose a class from the job masters; at 50, pass their trial to advance. Quests marked ★ follow the main story, all the way to level 100. If you die you become a ghost: walk to a shrine's golden circle to live again. Progress saves automatically.", Ui.Muted, 14, true));
     }
 
     // ---- NPC windows ----------------------------------------------------------------------
@@ -747,17 +777,18 @@ public partial class Hud : Control
         portrait.Doll.SetLook(npc.Look);
         var greet = Ui.Label(npc.Greet, null, 15, true);
         body.AddChild(Ui.HBox(10).With(portrait, greet));
-        foreach (var q in Content.Quests.Values.Where(q => q.Giver == npcId))
+        foreach (var q in W.QuestsAt(npcId))
         {
             var st = W.QuestState(q.Id);
+            bool here = q.Ender == npcId;
             if (st == "available")
             {
                 var reward = $"Reward: {q.RewardExp} EXP, {q.RewardGold} gold" + string.Concat(q.RewardItems.Select(r => $", {Content.Items[r.Item].Name}{(r.Qty > 1 ? $" x{r.Qty}" : "")}"));
-                body.With(Ui.Label($"! {q.Title}", Ui.GoldHi), Ui.Label(q.Text, null, 14, true), Ui.Label(reward, Ui.Muted, 13, true),
+                body.With(Ui.Label($"{(q.Story ? "★" : "!")} {q.Title}", Ui.GoldHi), Ui.Label(q.Text, null, 14, true), Ui.Label(reward, Ui.Muted, 13, true),
                     Ui.Button("Accept quest", () => W.AcceptQuest(q.Id), true));
             }
-            else if (st == "active") body.AddChild(Ui.Label($"{q.Title} · in progress · {W.QuestProgress(q.Id)}", Ui.Muted, 14, true));
-            else if (st == "ready") body.AddChild(Ui.Button($"Complete: {q.Title}", () => W.CompleteQuest(q.Id), true));
+            else if (st == "ready" && here) body.AddChild(Ui.Button($"Complete: {q.Title}", () => W.CompleteQuest(q.Id), true));
+            else if (st is "active" or "ready") body.AddChild(Ui.Label($"{q.Title} · in progress · {W.QuestProgress(q.Id)}", Ui.Muted, 14, true));
             else if (st == "locked" && p.Level >= q.Level - 2) body.AddChild(Ui.Label($"Come back at level {q.Level} for more work.", Ui.Muted, 14));
         }
         foreach (var svc in npc.Services)
@@ -781,8 +812,20 @@ public partial class Hud : Control
                                 Ui.Button($"Yes, become a {c.Name}", () => { _confirmClass = null; W.ChooseClass(c.Id); }, true));
                         else body.AddChild(Ui.Button($"Become a {c.Name}", () => { _confirmClass = c.Id; if (_open.TryGetValue("dialog", out var d)) Refresh(d, true); }, true));
                     }
-                    else if (p.Cls == c.Id)
+                    else if (p.Cls == c.Id && Content.AdvancedOf(c.Id) is { } adv)
+                    {
                         body.AddChild(Ui.Label($"Train well, {c.Name}. New skills come at levels {string.Join(", ", Content.Skills.Values.Where(s => s.Cls == c.Id).Select(s => s.Level))}.", Ui.Muted, 14, true));
+                        body.With(Ui.Label($"{adv.Name} · {adv.Role}", Assets.C(adv.Color)), Ui.Label(adv.Desc, null, 14, true),
+                            Ui.Label($"Grows {adv.HpLv} HP and {adv.MpLv} MP per level, and learns {string.Join(", ", Content.Skills.Values.Where(s => s.Cls == adv.Id).Select(s => $"{s.Name} ({s.Level})"))}.", Ui.Muted, 13, true));
+                        var why = W.AdvanceProblem(adv.Id);
+                        if (why != null) body.AddChild(Ui.Button($"Become a {adv.Name} · {why}", () => { }, disabled: true));
+                        else if (_confirmClass == adv.Id)
+                            body.With(Ui.Label("This choice is permanent.", Ui.Bad, 14),
+                                Ui.Button($"Yes, become a {adv.Name}", () => { _confirmClass = null; W.AdvanceClass(adv.Id); }, true));
+                        else body.AddChild(Ui.Button($"Become a {adv.Name}", () => { _confirmClass = adv.Id; if (_open.TryGetValue("dialog", out var d)) Refresh(d, true); }, true));
+                    }
+                    else if (p.Cls != null && Content.ClassLine(p.Cls).Contains(c.Id))
+                        body.AddChild(Ui.Label($"A {Content.Classes[p.Cls].Name}! I taught you to hold a weapon, and now look at you.", Ui.Muted, 14, true));
                     break;
                 }
             }
@@ -925,6 +968,9 @@ public partial class Minimap : Control
         ['T'] = "#2f6b2a", ['P'] = "#22502a", ['R'] = "#3b4a5e", ['Q'] = "#2f6b5e", ['H'] = "#e6d9bb", ['D'] = "#8a5530", ['S'] = "#f4d870",
         ['F'] = "#8a6036", ['*'] = "#74ad52", ['W'] = "#6e6a60", ['L'] = "#8a867a", ['p'] = "#4d7a6a", ['B'] = "#3a7a30", ['r'] = "#6e6c66",
         ['c'] = "#5a4e44", ['X'] = "#1e1a17", ['t'] = "#f0a030", ['m'] = "#6b5e52", ['a'] = "#8a2a20", ['='] = "#8a6238",
+        ['s'] = "#e0cc98", ['v'] = "#7a8a40", ['z'] = "#56603a", ['d'] = "#a07850", ['o'] = "#e87070", ['h'] = "#5a5250",
+        ['l'] = "#e85020", ['O'] = "#2e2a32", ['n'] = "#e8eef6", ['Y'] = "#2a5a48", ['i'] = "#a8d4ec", ['b'] = "#3a7a3a",
+        ['j'] = "#5a4a40", ['u'] = "#6a5a48", ['y'] = "#ff6080", ['k'] = "#e8ecf8", ['V'] = "#6a90d8", ['M'] = "#c8c4d0", ['I'] = "#8a8478",
     };
 
     public void Rebuild(GameMap map)
