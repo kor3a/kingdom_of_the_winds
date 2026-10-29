@@ -8,7 +8,10 @@ public sealed class World
     private const double PlayerStep = 0.19, GhostStep = 0.12;
     private static readonly Dictionary<string, string> BuffLabels = new()
     {
-        ["guard"] = "Taunt guard", ["warcry"] = "War Cry", ["stealth"] = "Shadow Veil", ["blessing"] = "Blessing",
+        ["guard"] = "Taunt guard", ["warcry"] = "War Cry", ["stealth"] = "Your cover", ["blessing"] = "Blessing",
+        ["banner"] = "War Banner", ["ironskin"] = "Iron Skin", ["barrier"] = "Your barrier", ["focus"] = "Focus",
+        ["haste"] = "Haste", ["manashield"] = "Mana Shield", ["surge"] = "Surge", ["regen"] = "Spring of Life",
+        ["sanctuary"] = "Sanctuary", ["avatar"] = "Avatar of Mercy",
     };
 
     public readonly Dictionary<string, GameMap> Maps;
@@ -34,7 +37,9 @@ public sealed class World
     {
         Maps = KotW.Shared.Maps.BuildAll();
         P = Player.FromSave(save);
+        if (!Maps.ContainsKey(P.MapId)) { P.MapId = "town"; P.Place(Rules.TownSpawnX, Rules.TownSpawnY); }
         EnterMap(P.MapId, P.X, P.Y, P.Facing, true);
+        FillBar();
         P.Hp = Math.Min(P.Hp, Pd.MaxHp);
         P.Mp = Math.Min(P.Mp, Pd.MaxMp);
     }
@@ -193,7 +198,10 @@ public sealed class World
         foreach (var k in P.Buffs.Keys.ToList())
         {
             P.Buffs[k] -= dt;
-            if (P.Buffs[k] <= 0) { P.Buffs.Remove(k); Msg($"{BuffLabels[k]} wore off.", "info"); }
+            if (P.Buffs[k] > 0) continue;
+            P.Buffs.Remove(k);
+            if (k == "barrier") P.Barrier = 0;
+            Msg($"{BuffLabels.GetValueOrDefault(k, k)} wore off.", "info");
         }
     }
 
@@ -205,6 +213,7 @@ public sealed class World
         if (P.Ghost) return;
         bool calm = Time - P.LastCombat > 6;
         double bless = P.Buffs.ContainsKey("blessing") ? 0.03 : 0;
+        if (P.Buffs.ContainsKey("regen") || P.Buffs.ContainsKey("banner") || P.Buffs.ContainsKey("avatar")) bless += 0.05;
         P.Hp = Math.Min(Pd.MaxHp, P.Hp + Math.Max(1, Math.Round(Pd.MaxHp * ((calm ? 0.04 : 0.01) + bless) + Pd.Stats.Con * 0.1)));
         P.Mp = Math.Min(Pd.MaxMp, P.Mp + Math.Max(1, Math.Round(Pd.MaxMp * ((calm ? 0.05 : 0.02) + bless))));
     }
@@ -224,7 +233,7 @@ public sealed class World
             int nx = P.X + dx, ny = P.Y + dy;
             var ent = EntityAt(nx, ny);
             bool canPass = Map.Walkable(nx, ny) && (ent == null || (P.Ghost && ent is Monster));
-            if (canPass) P.StartStep(nx, ny, P.Ghost ? GhostStep : PlayerStep);
+            if (canPass) P.StartStep(nx, ny, P.Ghost ? GhostStep : PlayerStep * Pd.MoveMul);
             else if (ent is Monster m && !P.Ghost) BasicAttack(m); // bump to attack
             else if (ent != null && input.Fresh) Interact(ent);
         }
@@ -257,6 +266,7 @@ public sealed class World
         if (P.Ghost || P.AtkCd > 0 || P.MoveT < 1) return;
         var t = GetTarget();
         if (t != null && t.Manhattan(P) == 1) { BasicAttack(t); return; }
+        if (ShotTarget() is { } shot) { Shoot(shot); return; }
         var (dx, dy) = P.Facing.Vec();
         var ent = EntityAt(P.X + dx, P.Y + dy);
         if (ent is Monster m) { BasicAttack(m); return; }
@@ -279,29 +289,62 @@ public sealed class World
         ApplyHit(m, r);
     }
 
-    private void ApplyHit(Monster m, Rules.Hit r, string kind = "hit", string sfx = "hit")
+    private int Reach => P.Cls == null ? 0 : Content.Classes[P.Cls].Reach;
+
+    // Bow classes shoot the selected target, or the nearest foe straight ahead, within reach.
+    private Monster? ShotTarget()
+    {
+        if (Reach == 0) return null;
+        var t = GetTarget();
+        if (t != null && t.Manhattan(P) <= Reach) return t;
+        var (dx, dy) = P.Facing.Vec();
+        for (int i = 1; i <= Reach; i++)
+        {
+            int x = P.X + dx * i, y = P.Y + dy * i;
+            if (Map.Solid(x, y)) return null;
+            if (EntityAt(x, y) is Monster m) return m;
+        }
+        return null;
+    }
+
+    private void Shoot(Monster m)
+    {
+        P.AtkCd = Pd.AtkDelay;
+        P.AttackAnim = 0.22;
+        P.Facing = DirX.Of(m.X - P.X, m.Y - P.Y);
+        Target ??= m.Id;
+        var r = Rules.RollMelee(Pd, m.D, P.Level, 0.9, BreakStealth());
+        Fx("arrow", m.X, m.Y, e => { e.FromX = P.X; e.FromY = P.Y; });
+        Sfx("arrow");
+        Later(0.12, () => { if (m.Hp > 0) ApplyHit(m, r); });
+    }
+
+    // Returns the damage dealt (0 on a miss), so draining skills know how much to heal.
+    private int ApplyHit(Monster m, Rules.Hit r, string kind = "hit", string sfx = "hit")
     {
         if (r.Miss)
         {
             Number(m.X, m.Y, "miss", "miss");
             Sfx("swing");
             Aggro(m);
-            return;
+            return 0;
         }
-        HurtMonster(m, r.Dmg, r.Crit, kind, sfx);
+        return HurtMonster(m, r.Dmg, r.Crit, kind, sfx);
     }
 
-    private void HurtMonster(Monster m, int dmg, bool crit, string kind = "hit", string sfx = "hit", bool noAggro = false)
+    private int HurtMonster(Monster m, int dmg, bool crit, string kind = "hit", string sfx = "hit", bool noAggro = false)
     {
-        if (m.Hp <= 0) return;
+        if (m.Hp <= 0) return 0;
+        if (m.Status.ContainsKey("curse")) dmg = (int)Math.Round(dmg * 1.25);
         m.Hp -= dmg;
         m.Flash = 0.12;
         m.LastHit = Time;
         P.LastCombat = Time;
         Number(m.X, m.Y, dmg.ToString(), crit ? "crit" : kind);
         Sfx(crit ? "crit" : sfx);
-        if (m.Hp <= 0) { KillMonster(m); return; }
+        if (m.Hp <= 0) { KillMonster(m); return dmg; }
         if (!noAggro) Aggro(m);
+        return dmg;
     }
 
     private void Aggro(Monster m)
@@ -336,7 +379,7 @@ public sealed class World
             if (qs.Count >= q.Count) Msg($"\"{q.Title}\" complete! Return to {Content.Npcs[q.Giver].Name}.", "quest");
             else Msg($"{q.Title}: {qs.Count}/{q.Count}", "quest");
         }
-        if (d.Boss) Msg($"{P.Name} has brought peace to the Hollow by defeating {d.Name}!", "shout", "Herald");
+        if (d.Boss) Msg($"{P.Name} has defeated {d.Name} in {Map.Name}!", "shout", "Herald");
         GainExp(exp);
         if (!m.NoRespawn) _respawns.Add((Time + (d.Respawn > 0 ? d.Respawn : Rnd.Int(10, 18)), m.Spawn));
     }
@@ -353,13 +396,19 @@ public sealed class World
             P.Unspent += Rules.PointsPerLevel;
             leveled = true;
             Msg($"Level up! You are now level {P.Level}. You have {P.Unspent} stat points to spend (C).", "level");
+            var line = Content.ClassLine(P.Cls);
             foreach (var s in Content.Skills.Values)
-                if (s.Cls == P.Cls && s.Level == P.Level) Msg($"You learned {s.Name}! It is on your hotbar.", "level");
+                if (line.Contains(s.Cls) && s.Level == P.Level) Msg($"You learned {s.Name}!", "level");
             if (P.Level == 5 && P.Cls == null)
                 Msg("You can now choose a path! Visit the job masters in front of the hall south of the plaza.", "quest");
+            if (P.Cls != null && Content.Classes[P.Cls].Base == null && P.Level == 48)
+                Msg("Your job master in Pungseong has a trial for you. Pass it to become an advanced class at level 50.", "quest");
+            if (P.Cls != null && Content.Classes[P.Cls].Base == null && P.Level == Content.AdvanceLevel)
+                Msg("You are ready to advance! Return to your job master in Pungseong once you have passed the trial.", "quest");
         }
         if (P.Level >= Rules.MaxLevel) P.Exp = 0;
         if (!leveled) return;
+        FillBar();
         Refresh();
         P.Hp = Pd.MaxHp;
         P.Mp = Pd.MaxMp;
@@ -376,15 +425,14 @@ public sealed class World
         m.AttackAnim = Math.Max(0, m.AttackAnim - dt);
         m.AtkCd -= dt;
         foreach (var s in st.Values) s.T -= dt;
-        if (st.TryGetValue("poison", out var poison))
+        foreach (var dot in new[] { "poison", "burn" })
         {
-            poison.Tick -= dt;
-            if (poison.Tick <= 0)
-            {
-                poison.Tick += 1;
-                HurtMonster(m, poison.Dmg, false, "poison", "poison", true);
-                if (m.Hp <= 0) return;
-            }
+            if (!st.TryGetValue(dot, out var eff)) continue;
+            eff.Tick -= dt;
+            if (eff.Tick > 0) continue;
+            eff.Tick += 1;
+            HurtMonster(m, eff.Dmg, false, "poison", dot == "burn" ? "fire" : "poison", true);
+            if (m.Hp <= 0) return;
         }
         foreach (var k in st.Keys.ToList()) if (st[k].T <= 0) st.Remove(k);
         if (m.MoveT < 1) m.MoveT = Math.Min(1, m.MoveT + dt / m.StepDur);
@@ -410,7 +458,7 @@ public sealed class World
                 {
                     m.ThinkT = Rnd.Range(1.2, 3.5);
                     Dir? dir = m.Manhattan(m.HomeX, m.HomeY) > 5 ? GreedyDir(m, m.HomeX, m.HomeY) : Rnd.Pick(DirX.All);
-                    if (dir.HasValue && Rnd.Next() < 0.75) StepMonster(m, dir.Value, d.MoveDur * 1.7);
+                    if (dir.HasValue && Rnd.Next() < 0.75 && !st.ContainsKey("root")) StepMonster(m, dir.Value, d.MoveDur * 1.7);
                 }
                 return;
             }
@@ -434,22 +482,23 @@ public sealed class World
             }
             return;
         }
+        if (st.ContainsKey("root")) return;
         var step = PathDir(m, P.X, P.Y) ?? GreedyDir(m, P.X, P.Y);
         if (step.HasValue) StepMonster(m, step.Value, d.MoveDur * (st.ContainsKey("slow") ? 1.8 : 1));
     }
 
     private bool BossSpecials(Monster m, int dist, double dt)
     {
-        if (!m.Summoned && m.Hp < m.MaxHp / 2)
+        if (!m.Summoned && m.Hp < m.MaxHp / 2 && m.D.Summon is { } summon)
         {
             m.Summoned = true;
-            Msg($"{m.D.Name} roars, and the bats of the Hollow answer!", "boss");
+            Msg($"{m.D.Name} roars, and {Content.Monsters[summon].Name}s answer the call!", "boss");
             int n = 0;
             for (int dy = -2; dy <= 2 && n < 2; dy++)
                 for (int dx = -2; dx <= 2 && n < 2; dx++)
                 {
-                    var bat = SpawnMonster(m.Spawn, (m.X + dx, m.Y + dy), true, "cave_bat");
-                    if (bat != null) { bat.State = "chase"; n++; }
+                    var add = SpawnMonster(m.Spawn, (m.X + dx, m.Y + dy), true, summon);
+                    if (add != null) { add.State = "chase"; n++; }
                 }
         }
         m.SpecialT -= dt;
@@ -474,6 +523,7 @@ public sealed class World
     private void MonsterHit(Monster m, double mult, bool unavoidable = false)
     {
         if (P.Ghost) return;
+        if (m.Status.ContainsKey("weak")) mult *= 0.7;
         var r = Rules.RollMonsterHit(m.D, Pd, mult, P.Buffs.ContainsKey("guard"), unavoidable);
         if (r.Miss) { Number(P.X, P.Y, "dodge", "miss"); return; }
         HurtPlayer(r.Dmg);
@@ -481,6 +531,21 @@ public sealed class World
 
     public void HurtPlayer(int dmg)
     {
+        if (P.Buffs.ContainsKey("sanctuary")) dmg = Math.Max(1, dmg / 2);
+        if (P.Barrier > 0)
+        {
+            double soak = Math.Min(P.Barrier, dmg);
+            P.Barrier -= soak;
+            dmg -= (int)soak;
+            if (P.Barrier <= 0) { P.Buffs.Remove("barrier"); Msg("Your barrier shatters.", "info"); }
+            if (dmg <= 0) { Number(P.X, P.Y, "absorb", "miss"); return; }
+        }
+        if (P.Buffs.ContainsKey("manashield") && P.Mp > 0)
+        {
+            int toMp = (int)Math.Min(P.Mp, dmg / 2);
+            P.Mp -= toMp;
+            dmg -= toMp;
+        }
         P.Hp -= dmg;
         P.LastCombat = Time;
         P.HurtFlash = 0.15;
@@ -495,6 +560,7 @@ public sealed class World
         P.Ghost = true;
         P.GhostAt = Time;
         P.Buffs.Clear();
+        P.Barrier = 0;
         int loss = (int)Math.Floor(Rules.ExpToNext(P.Level) * 0.05);
         P.Exp = Math.Max(0, P.Exp - loss);
         Target = null;
@@ -600,24 +666,53 @@ public sealed class World
     }
 
     // ---- skills ------------------------------------------------------------------------
-    public List<string> LearnedSkills() => P.Cls == null ? new() :
-        Content.Skills.Values.Where(s => s.Cls == P.Cls && s.Level <= P.Level).OrderBy(s => s.Level).Select(s => s.Id).ToList();
+    public List<string> LearnedSkills()
+    {
+        var line = Content.ClassLine(P.Cls);
+        return Content.Skills.Values.Where(s => line.Contains(s.Cls) && s.Level <= P.Level).OrderBy(s => s.Level).Select(s => s.Id).ToList();
+    }
 
-    // Slots 0-5 are class skills, 6 and 7 drink the best healing and mana items.
+    // Slots 0-7 hold the skills the player put there; 8 and 9 drink the best healing and mana items.
     public string?[] Hotbar()
     {
-        var sk = LearnedSkills();
-        var slots = new string?[8];
-        for (int i = 0; i < 6; i++) slots[i] = i < sk.Count ? sk[i] : null;
-        slots[6] = "potion:hp";
-        slots[7] = "potion:mp";
+        var learned = LearnedSkills();
+        var slots = new string?[Rules.SkillSlots + 2];
+        for (int i = 0; i < Rules.SkillSlots; i++) slots[i] = P.Bar[i] is { } id && learned.Contains(id) ? id : null;
+        slots[Rules.SkillSlots] = "potion:hp";
+        slots[Rules.SkillSlots + 1] = "potion:mp";
         return slots;
+    }
+
+    // New skills go into the first free key, so nothing learned is ever out of reach by default.
+    private void FillBar()
+    {
+        var learned = LearnedSkills();
+        for (int i = 0; i < Rules.SkillSlots; i++) if (P.Bar[i] != null && !learned.Contains(P.Bar[i]!)) P.Bar[i] = null;
+        foreach (var id in learned)
+        {
+            if (P.Bar.Contains(id)) continue;
+            int free = Array.IndexOf(P.Bar, null);
+            if (free < 0) break;
+            P.Bar[free] = id;
+        }
+    }
+
+    // Puts a skill on a key; whatever was there swaps into the skill's old key. slot -1 removes it.
+    public void AssignSkill(string id, int slot)
+    {
+        if (!LearnedSkills().Contains(id)) return;
+        int old = Array.IndexOf(P.Bar, id);
+        if (slot < 0) { if (old >= 0) P.Bar[old] = null; return; }
+        if (slot >= Rules.SkillSlots) return;
+        if (old >= 0) P.Bar[old] = P.Bar[slot];
+        P.Bar[slot] = id;
+        Sfx("ui");
     }
 
     public void UseHotbar(int i)
     {
-        var s = Hotbar()[i];
-        if (s == null) return;
+        var bar = Hotbar();
+        if (i < 0 || i >= bar.Length || bar[i] is not { } s) return;
         if (s.StartsWith("potion:")) QuickPotion(s[7..]);
         else CastSkill(s);
     }
@@ -646,6 +741,53 @@ public sealed class World
         return m.State != "chase" || (P.X == m.X - fx && P.Y == m.Y - fy);
     }
 
+    private static string StatusOf(SkillDef s) => s.Effect is "poison" or "burn" or "slow" or "stun" or "root" or "curse" or "weak" ? s.Effect : "";
+
+    // Leaves the skill's lingering effect on a foe it hit.
+    private void Afflict(Monster m, SkillDef s, Derived pd)
+    {
+        if (m.Hp <= 0) return;
+        switch (StatusOf(s))
+        {
+            case "": break;
+            case "poison": m.Status["poison"] = new StatusEffect { T = s.Dur, Dmg = Math.Max(2, (int)Math.Round(pd.Atk * 0.35)) }; break;
+            case "burn": m.Status["burn"] = new StatusEffect { T = s.Dur, Dmg = Math.Max(2, (int)Math.Round(pd.Matk * 0.3)) }; break;
+            case "stun": m.Status["stun"] = new StatusEffect { T = m.D.Boss ? Math.Min(1, s.Dur) : s.Dur }; break;
+            case "root": m.Status["root"] = new StatusEffect { T = m.D.Boss ? Math.Min(1.5, s.Dur) : s.Dur }; break;
+            default: m.Status[s.Effect] = new StatusEffect { T = s.Dur }; break;
+        }
+        if (s.Knock > 0) Knock(m, s.Knock);
+    }
+
+    // Shoves a foe straight away from the player until it hits something.
+    private void Knock(Monster m, int tiles)
+    {
+        if (m.D.Boss) return;
+        var dir = DirX.Of(m.X - P.X, m.Y - P.Y);
+        var (dx, dy) = dir.Vec();
+        for (int i = 0; i < tiles; i++)
+        {
+            if (!IsFree(m.X + dx, m.Y + dy, true)) break;
+            m.Place(m.X + dx, m.Y + dy);
+        }
+    }
+
+    // One hit from a skill: melee-style or spell-style roll, curse, execute, drain and status.
+    private void SkillHit(Monster m, SkillDef s, Derived pd, double mult, bool forceCrit, string kind = "spell")
+    {
+        if (m.Hp <= 0) return;
+        if (s.Execute > 0 && m.Hp < m.MaxHp * s.Execute) mult *= 2;
+        bool phys = s.Phys || s.Type is SkillType.Melee or SkillType.Dash || (s.Type == SkillType.Around && s.Power == 0);
+        var r = phys ? Rules.RollMelee(pd, m.D, P.Level, mult, forceCrit) : Rules.RollSpell(pd, m.D, mult, forceCrit);
+        int dealt = phys ? ApplyHit(m, r) : HurtMonster(m, r.Dmg, r.Crit, kind);
+        if (dealt > 0 && s.Drain > 0 && !P.Ghost)
+        {
+            int heal = (int)Math.Min(Pd.MaxHp - P.Hp, Math.Round(dealt * s.Drain));
+            if (heal > 0) { P.Hp += heal; Number(P.X, P.Y, $"+{heal}", "heal"); }
+        }
+        if (dealt > 0) Afflict(m, s, pd);
+    }
+
     public void CastSkill(string id)
     {
         var s = Content.Skills[id];
@@ -668,8 +810,16 @@ public sealed class World
         switch (s.Type)
         {
             case SkillType.Melee:
+            case SkillType.Dash:
             {
-                var m = MeleeTarget();
+                Monster? m;
+                if (s.Type == SkillType.Dash)
+                {
+                    m = SpellTarget(s.Range);
+                    if (m == null) { Msg("No enemy in range. Press Tab to pick one.", "warn"); return; }
+                    if (m.Manhattan(P) > 1 && !DashTo(m, s.BehindMult > 0)) { Msg("There is no room to land beside it.", "warn"); return; }
+                }
+                else m = MeleeTarget();
                 if (m == null) { Msg("No enemy within reach.", "warn"); return; }
                 P.Facing = DirX.Of(m.X - P.X, m.Y - P.Y);
                 P.AttackAnim = 0.22;
@@ -683,21 +833,52 @@ public sealed class World
                     {
                         if (m.Hp <= 0) return;
                         Fx("slash", m.X, m.Y, e => { e.Dir = P.Facing; e.Color = s.Color; });
-                        ApplyHit(m, Rules.RollMelee(pd, m.D, P.Level, mult, forceCrit && hit == 0));
+                        SkillHit(m, s, pd, mult, forceCrit && hit == 0);
                     });
                 }
-                if (s.Effect == "poison")
-                    Later(0.05, () => { if (m.Hp > 0) m.Status["poison"] = new StatusEffect { T = s.Dur, Dmg = Math.Max(2, (int)Math.Round(pd.Atk * 0.35)) }; });
                 break;
             }
             case SkillType.Around:
             {
-                var ms = Monsters.Where(o => o.Chebyshev(P) == 1).ToList();
-                if (ms.Count == 0) { Msg("No enemies around you.", "warn"); return; }
+                int radius = Math.Max(1, s.Radius);
+                var ms = Monsters.Where(o => o.Chebyshev(P) <= radius).ToList();
+                if (ms.Count == 0) { Msg(radius == 1 ? "No enemies around you." : $"No enemies within {radius} tiles.", "warn"); return; }
                 P.AttackAnim = 0.3;
                 bool forceCrit = BreakStealth();
-                Fx("whirl", P.X, P.Y);
-                foreach (var m in ms) ApplyHit(m, Rules.RollMelee(pd, m.D, P.Level, s.Mult, forceCrit));
+                double mult = s.Power > 0 ? s.Power : s.Mult;
+                string fx = s.Fx != "" ? s.Fx : radius > 1 ? "nova" : "whirl";
+                for (int i = 0; i < s.Hits; i++)
+                {
+                    int hit = i;
+                    Later(i * 0.18, () =>
+                    {
+                        Fx(fx, P.X, P.Y, e => { e.R = radius; e.Color = s.Color; });
+                        if (s.Fx != "") Sfx(s.Fx);
+                        foreach (var m in ms) SkillHit(m, s, pd, mult, forceCrit && hit == 0, "hit");
+                    });
+                }
+                break;
+            }
+            case SkillType.Line:
+            {
+                var t = GetTarget();
+                if (t != null && (t.X == P.X || t.Y == P.Y) && t.Manhattan(P) <= s.Range) P.Facing = DirX.Of(t.X - P.X, t.Y - P.Y);
+                var (dx, dy) = P.Facing.Vec();
+                var hits = new List<Monster>();
+                int reach = 0;
+                for (int i = 1; i <= s.Range; i++)
+                {
+                    int x = P.X + dx * i, y = P.Y + dy * i;
+                    if (Map.Solid(x, y)) break;
+                    reach = i;
+                    if (EntityAt(x, y) is Monster m) hits.Add(m);
+                }
+                if (hits.Count == 0) { Msg("No enemy in that line. Face one first.", "warn"); return; }
+                P.AttackAnim = 0.3;
+                bool forceCrit = BreakStealth();
+                Fx("beam", P.X + dx * reach, P.Y + dy * reach, e => { e.FromX = P.X; e.FromY = P.Y; e.Color = s.Color; });
+                Sfx(s.Phys ? "arrow" : "fire");
+                Later(0.1, () => { foreach (var m in hits) SkillHit(m, s, pd, s.Power, forceCrit); });
                 break;
             }
             case SkillType.Target:
@@ -708,18 +889,21 @@ public sealed class World
                 P.AttackAnim = 0.3;
                 bool forceCrit = BreakStealth();
                 var victims = s.Radius > 0 ? Monsters.Where(o => o.Chebyshev(m) <= s.Radius).ToList() : new List<Monster> { m };
-                Fx(s.Fx, m.X, m.Y, e => { e.FromX = P.X; e.FromY = P.Y; e.R = s.Radius; });
-                Sfx(s.Fx);
-                Later(s.Fx is "fire" or "ice" ? 0.18 : 0.05, () =>
+                if (s.Chain > 0)
+                    victims.AddRange(Monsters.Where(o => o != m && !victims.Contains(o) && o.Manhattan(m) <= 4)
+                        .OrderBy(o => o.Manhattan(m)).Take(s.Chain));
+                Fx(s.Fx, m.X, m.Y, e => { e.FromX = P.X; e.FromY = P.Y; e.R = s.Radius; e.Color = s.Color; });
+                var prev = m;
+                foreach (var v in victims.Where(v => v != m && v.Chebyshev(m) > s.Radius))
                 {
-                    foreach (var v in victims)
-                    {
-                        if (v.Hp <= 0) continue;
-                        HurtMonster(v, Rules.RollSpell(pd, v.D, s.Power, forceCrit).Dmg, false, "spell");
-                        if (v.Hp <= 0) continue;
-                        if (s.Effect == "slow") v.Status["slow"] = new StatusEffect { T = s.Dur };
-                        if (s.Effect == "stun") v.Status["stun"] = new StatusEffect { T = v.D.Boss ? 1 : s.Dur };
-                    }
+                    var from = prev;
+                    Fx(s.Fx, v.X, v.Y, e => { e.FromX = from.X; e.FromY = from.Y; e.Color = s.Color; });
+                    prev = v;
+                }
+                Sfx(s.Fx);
+                Later(s.Fx is "fire" or "ice" or "arrow" or "spirit" or "drain" ? 0.18 : 0.05, () =>
+                {
+                    foreach (var v in victims) SkillHit(v, s, pd, s.Power, forceCrit, s.Phys ? "hit" : "spell");
                 });
                 break;
             }
@@ -730,6 +914,21 @@ public sealed class World
         P.Mp -= s.Mp;
         P.Cds[id] = s.Cd;
         Refresh();
+    }
+
+    // Leaps to a free tile beside the foe: behind it for an ambush, else the side nearest the player.
+    private bool DashTo(Monster m, bool behind)
+    {
+        var (fx, fy) = m.Facing.Vec();
+        var spots = DirX.All.Select(d => d.Vec()).Select(v => (X: m.X + v.X, Y: m.Y + v.Y))
+            .Where(p => IsFree(p.X, p.Y, false) && Map.PortalAt(p.X, p.Y) == null)
+            .OrderBy(p => behind && p.X == m.X - fx && p.Y == m.Y - fy ? 0 : 1)
+            .ThenBy(p => Math.Abs(p.X - P.X) + Math.Abs(p.Y - P.Y)).ToList();
+        if (spots.Count == 0) return false;
+        Fx("smoke", P.X, P.Y);
+        P.Place(spots[0].X, spots[0].Y);
+        Sfx("stealth");
+        return true;
     }
 
     private void SelfSkill(SkillDef s)
@@ -756,15 +955,24 @@ public sealed class World
                 break;
             }
             case "stealth":
+            case "windwalk":
                 P.Buffs["stealth"] = s.Dur;
+                if (s.Effect == "windwalk") P.Buffs["haste"] = s.Dur;
                 foreach (var m in Monsters) if (m.State == "chase") { m.State = "idle"; m.ThinkT = 1; }
                 Fx("smoke", P.X, P.Y);
                 Sfx("stealth");
                 break;
-            default:
-                P.Buffs[s.Effect] = s.Dur;
+            case "barrier":
+                P.Barrier = Math.Round(Pd.MaxHp * s.Power);
+                P.Buffs["barrier"] = s.Dur;
                 Fx("buff", P.X, P.Y, e => e.Color = s.Color);
                 Sfx("buff");
+                Msg($"A barrier of {P.Barrier} surrounds you.", "info");
+                break;
+            default:
+                P.Buffs[s.Effect] = s.Dur;
+                Fx(s.Effect is "regen" or "avatar" ? "heal" : "buff", P.X, P.Y, e => e.Color = s.Color);
+                Sfx(s.Effect is "regen" ? "heal" : "buff");
                 break;
         }
     }
@@ -849,9 +1057,11 @@ public sealed class World
         Consume(i);
         if (it.Teleport)
         {
+            var dest = Maps[it.Dest];
+            var (tx, ty) = dest.Spawn ?? (Rules.TownSpawnX, Rules.TownSpawnY);
             Fx("portal", P.X, P.Y);
-            EnterMap("town", Rules.TownSpawnX, Rules.TownSpawnY, Dir.Down);
-            Msg("The scroll's wind carries you home.", "info");
+            EnterMap(dest.Id, tx, ty, Dir.Down);
+            Msg($"The scroll's wind carries you to {dest.Name}.", "info");
         }
     }
 
@@ -982,9 +1192,11 @@ public sealed class World
     {
         if (P.Cls != null) { Msg($"You already walk the path of the {Content.Classes[P.Cls].Name}.", "warn"); return; }
         if (P.Level < 5) { Msg("Come back when you reach level 5.", "warn"); return; }
-        P.Cls = cls;
         var c = Content.Classes[cls];
+        if (c.Base != null) return;
+        P.Cls = cls;
         AddItem(c.Weapon);
+        FillBar();
         Refresh();
         P.Hp = Pd.MaxHp;
         P.Mp = Pd.MaxMp;
@@ -992,6 +1204,33 @@ public sealed class World
         Sfx("quest");
         Msg($"You are now a {c.Name}! Your master gives you the {Content.Items[c.Weapon].Name}.", "level");
         foreach (var id in LearnedSkills()) Msg($"You learned {Content.Skills[id].Name}. Press its number key to use it.", "level");
+    }
+
+    // Why the player cannot advance to this class yet, or null if they can.
+    public string? AdvanceProblem(string cls)
+    {
+        var c = Content.Classes[cls];
+        if (c.Base == null || P.Cls != c.Base) return $"Only a {Content.Classes[c.Base ?? cls].Name} can become a {c.Name}.";
+        if (P.Level < Content.AdvanceLevel) return $"Reach level {Content.AdvanceLevel} first.";
+        if (c.Trial != null && QuestState(c.Trial) != "done") return $"Pass the {Content.Quests[c.Trial].Title} first.";
+        return null;
+    }
+
+    public void AdvanceClass(string cls)
+    {
+        var problem = AdvanceProblem(cls);
+        if (problem != null) { Msg(problem, "warn"); return; }
+        var c = Content.Classes[cls];
+        P.Cls = cls;
+        FillBar();
+        Refresh();
+        P.Hp = Pd.MaxHp;
+        P.Mp = Pd.MaxMp;
+        Fx("levelup", P.X, P.Y);
+        Sfx("levelup");
+        Msg($"You have become a {c.Name}! New skills will come at levels {string.Join(", ", Content.Skills.Values.Where(s => s.Cls == cls).Select(s => s.Level))}.", "level");
+        Msg($"{P.Name} has risen to {c.Name}!", "shout", "Herald");
+        foreach (var id in LearnedSkills().Where(id => Content.Skills[id].Cls == cls)) Msg($"You learned {Content.Skills[id].Name}!", "level");
     }
 
     public void AllocStat(Stat k)
@@ -1003,6 +1242,7 @@ public sealed class World
         Sfx("ui");
     }
 
+    // available | active | ready | done | locked (level too low) | hidden (prerequisite or class not met)
     public string QuestState(string qid)
     {
         var q = Content.Quests[qid];
@@ -1011,23 +1251,30 @@ public sealed class World
             if (qs.State == "done") return "done";
             return QuestReady(qid) ? "ready" : "active";
         }
+        if (q.Cls != null && (P.Cls == null || Content.BaseClass(P.Cls) != q.Cls)) return "hidden";
+        if (q.Requires != null && QuestState(q.Requires) != "done") return "hidden";
         return P.Level >= q.Level ? "available" : "locked";
     }
 
     private bool QuestReady(string qid)
     {
         var q = Content.Quests[qid];
-        return q.KillMonster != null ? P.Quests[qid].Count >= q.Count : CountItem(q.BringItem!) >= q.Count;
+        if (q.KillMonster != null) return P.Quests[qid].Count >= q.Count;
+        if (q.BringItem != null) return CountItem(q.BringItem) >= q.Count;
+        return true; // a message to deliver is ready the moment it is accepted
     }
 
     public string QuestProgress(string qid)
     {
         var q = Content.Quests[qid];
         int count = P.Quests.TryGetValue(qid, out var qs) ? qs.Count : 0;
-        return q.KillMonster != null
-            ? $"{Content.Monsters[q.KillMonster].Name}: {Math.Min(count, q.Count)}/{q.Count}"
-            : $"{Content.Items[q.BringItem!].Name}: {Math.Min(CountItem(q.BringItem!), q.Count)}/{q.Count}";
+        if (q.KillMonster != null) return $"{Content.Monsters[q.KillMonster].Name}: {Math.Min(count, q.Count)}/{q.Count}";
+        if (q.BringItem != null) return $"{Content.Items[q.BringItem].Name}: {Math.Min(CountItem(q.BringItem), q.Count)}/{q.Count}" +
+            (q.TurnIn != null ? $" · bring to {Content.Npcs[q.TurnIn].Name}" : "");
+        return $"Speak to {Content.Npcs[q.Ender].Name} ({MapName(Content.Npcs[q.Ender].Map)})";
     }
+
+    public string MapName(string mapId) => Maps.TryGetValue(mapId, out var m) ? m.Name : mapId;
 
     public void AcceptQuest(string qid)
     {
@@ -1044,6 +1291,7 @@ public sealed class World
         if (q.BringItem != null) RemoveItem(q.BringItem, q.Count);
         P.Quests[qid].State = "done";
         P.Gold += q.RewardGold;
+        if (q.Outro != null) Msg(q.Outro, "local", Content.Npcs[q.Ender].Name);
         Msg($"Quest complete: {q.Title}! +{q.RewardExp} EXP, +{q.RewardGold} gold", "quest");
         foreach (var (id, n) in q.RewardItems)
         {
@@ -1052,21 +1300,28 @@ public sealed class World
         }
         Sfx("quest");
         GainExp(q.RewardExp);
+        var next = Content.Quests.Values.FirstOrDefault(n => n.Story && n.Requires == qid);
+        if (q.Story && next != null)
+            Msg($"The story continues: {Content.Npcs[next.Giver].Name} in {MapName(Content.Npcs[next.Giver].Map)}" +
+                (P.Level < next.Level ? $" will have news at level {next.Level}." : " has news for you."), "quest");
     }
 
-    // '!' when an NPC has a quest to offer, '?' when one is ready to turn in.
+    // '!' when an NPC has a quest to offer, '?' when one is ready to turn in with them.
     public char? QuestMark(string npcId)
     {
         char? mark = null;
         foreach (var q in Content.Quests.Values)
         {
-            if (q.Giver != npcId) continue;
             var st = QuestState(q.Id);
-            if (st == "ready") return '?';
-            if (st == "available") mark = '!';
+            if (st == "ready" && q.Ender == npcId) return '?';
+            if (st == "available" && q.Giver == npcId) mark = '!';
         }
         return mark;
     }
+
+    // The quests to show in an NPC's dialog: ones they give, and messages or errands to hand in to them.
+    public IEnumerable<QuestDef> QuestsAt(string npcId) =>
+        Content.Quests.Values.Where(q => q.Giver == npcId || (q.Ender == npcId && P.Quests.ContainsKey(q.Id)));
 
     public void TalkTo(string npcId)
     {

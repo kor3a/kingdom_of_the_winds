@@ -79,6 +79,28 @@ public static class Pal
         return FromHsv(h, s, v, c.A);
     }
 
+    // Turns the hue by dh degrees and scales saturation and brightness: palette swaps for monster variants.
+    public static Rgba Rotate(Rgba c, double dh, double sMul = 1, double vMul = 1)
+    {
+        var (h, s, v) = Hsv(c);
+        return FromHsv(h + dh, s * sMul, v * vMul, c.A);
+    }
+
+    // Repaints a colour onto a ramp by its brightness, so any sprite can be re-dyed in new colours.
+    public static Rgba Onto(Rgba c, Rgba[] ramp)
+    {
+        double l = (0.3 * c.R + 0.59 * c.G + 0.11 * c.B) / 255.0;
+        double pos = Math.Clamp(l * 1.25, 0, 1) * (ramp.Length - 1);
+        int i = Math.Min(ramp.Length - 2, (int)pos);
+        double t = pos - i;
+        var (a, b) = (ramp[i], ramp[i + 1]);
+        byte Mix(byte x, byte y) => (byte)Math.Round(x + (y - x) * t);
+        return new Rgba(Mix(a.R, b.R), Mix(a.G, b.G), Mix(a.B, b.B), c.A);
+    }
+
+    public static double Sat(Rgba c) => Hsv(c).S;
+    public static double Hue(Rgba c) => Hsv(c).H;
+
     // [outline, shadow, base, light, shine]
     public static Rgba[] Ramp(Rgba b) => new[] { Shift(b, -0.68), Shift(b, -0.3), b, Shift(b, 0.25), Shift(b, 0.55) };
     public static Rgba[] Ramp(string hex) => Ramp(Hex(hex));
@@ -210,10 +232,37 @@ public sealed class Canvas
                 Set(dx + x, dy + y, s.P[y * s.W + (flip ? s.W - 1 - x : x)]);
     }
 
+    // Copies s only into pixels that are still empty, so glows and swing trails sit behind what is drawn.
+    public void BlitUnder(Canvas s)
+    {
+        for (int i = 0; i < P.Length; i++) if (P[i].A == 0) P[i] = s.P[i];
+    }
+
+    // A soft halo that fades out from the centre; keeps the strongest alpha where halos overlap.
+    public void Glow(double cx, double cy, double r, Rgba c, double maxA)
+    {
+        for (int y = (int)Math.Floor(cy - r); y <= (int)Math.Ceiling(cy + r); y++)
+            for (int x = (int)Math.Floor(cx - r); x <= (int)Math.Ceiling(cx + r); x++)
+            {
+                double dist = Math.Sqrt(Math.Pow(x + 0.5 - cx, 2) + Math.Pow(y + 0.5 - cy, 2));
+                if (dist > r || !In(x, y)) continue;
+                byte a = (byte)Math.Round(maxA * (1 - dist / r));
+                if (a > Get(x, y).A) P[y * W + x] = c.WithA(a);
+            }
+    }
+
     public Canvas Mirror()
     {
         var c = new Canvas(W, H);
         c.Blit(this, 0, 0, true);
+        return c;
+    }
+
+    // Nearest-neighbour enlargement, for boss versions of ordinary monsters.
+    public Canvas Scaled(double k)
+    {
+        var c = new Canvas((int)Math.Round(W * k), (int)Math.Round(H * k));
+        for (int y = 0; y < c.H; y++) for (int x = 0; x < c.W; x++) c.P[y * c.W + x] = Get((int)(x / k), (int)(y / k));
         return c;
     }
 

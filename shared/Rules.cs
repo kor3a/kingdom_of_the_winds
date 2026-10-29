@@ -52,6 +52,7 @@ public sealed class SaveData
     public Dictionary<string, string?> Equip { get; set; } = new();
     public ItemStack?[] Storage { get; set; } = new ItemStack?[Rules.StorageSize];
     public Dictionary<string, QuestProgress> Quests { get; set; } = new();
+    public string?[] Bar { get; set; } = new string?[Rules.SkillSlots]; // skill on each hotbar key
     public string MapId { get; set; } = "town";
     public int X { get; set; } = Rules.TownSpawnX;
     public int Y { get; set; } = Rules.TownSpawnY;
@@ -63,12 +64,13 @@ public sealed class Derived
 {
     public StatBlock Stats = new();
     public int MaxHp, MaxMp, Atk, Matk, Def;
-    public double Crit, Evade, AtkDelay;
+    public double Crit, Evade, AtkDelay, MoveMul = 1;
 }
 
 public static class Rules
 {
-    public const int MaxLevel = 30;
+    public const int MaxLevel = 100;
+    public const int SkillSlots = 8;
     public const int BagSize = 24;
     public const int StorageSize = 24;
     public const int PointsPerLevel = 3;
@@ -94,19 +96,27 @@ public static class Rules
         int lv = p.Level - 1;
         double atk = 2 + s.Str * 1.3 + s.Dex * 0.3 + atkG;
         double def = s.Con * 0.5 + defG;
-        if (p.Buffs.ContainsKey("warcry")) atk *= 1.3;
-        if (p.Buffs.ContainsKey("blessing")) { atk *= 1.1; def = def * 1.3 + 3; }
+        double matk = 2 + s.Int * 1.6 + s.Wis * 0.8 + matkG;
+        bool Has(string b) => p.Buffs.ContainsKey(b);
+        if (Has("warcry")) atk *= 1.3;
+        if (Has("blessing")) { atk *= 1.1; def = def * 1.3 + 3; }
+        if (Has("banner")) { atk *= 1.2; def *= 1.2; }
+        if (Has("ironskin")) def *= 1.6;
+        if (Has("surge")) matk *= 1.4;
+        if (Has("avatar")) { matk *= 1.3; def *= 1.3; }
+        bool haste = Has("haste");
         return new Derived
         {
             Stats = s,
             MaxHp = (int)Math.Round(30 + s.Con * 6.0 + lv * cls.HpLv + hpG),
             MaxMp = (int)Math.Round(10 + s.Wis * 4.0 + s.Int * 2 + lv * cls.MpLv + mpG),
             Atk = (int)Math.Round(atk),
-            Matk = (int)Math.Round(2 + s.Int * 1.6 + s.Wis * 0.8 + matkG),
+            Matk = (int)Math.Round(matk),
             Def = (int)Math.Round(def),
-            Crit = Math.Min(0.5, 0.03 + s.Dex * 0.006 + critG),
+            Crit = Math.Min(Has("focus") ? 0.75 : 0.5, 0.03 + s.Dex * 0.006 + critG + (Has("focus") ? 0.25 : 0)),
             Evade = Math.Min(0.4, 0.02 + s.Dex * 0.004 + cls.Evade),
-            AtkDelay = Math.Max(0.35, 0.75 - s.Dex * 0.006),
+            AtkDelay = Math.Max(0.35, 0.75 - s.Dex * 0.006) * (haste ? 0.7 : 1),
+            MoveMul = haste ? 0.75 : 1,
         };
     }
 
@@ -155,7 +165,7 @@ public static class Rules
     public static string? EquipProblem(Player p, ItemDef it)
     {
         if (it.Level > 0 && p.Level < it.Level) return $"You need to be level {it.Level} to use {it.Name}.";
-        if (it.Classes != null && (p.Cls == null || !it.Classes.Contains(p.Cls)))
+        if (it.Classes != null && !Content.ClassLine(p.Cls).Any(it.Classes.Contains))
             return $"Only a {string.Join(" or ", it.Classes.Select(c => Content.Classes[c].Name))} can use {it.Name}.";
         return null;
     }
@@ -169,7 +179,7 @@ public static class Rules
         foreach (var slot in Content.EquipSlots) d.Equip[slot] = null;
         d.Equip["weapon"] = "wooden_sword";
         d.Equip["armor"] = "hemp_robe";
-        d.Hp = d.Mp = 9999; // clamped to the real maximum on load
+        d.Hp = d.Mp = 99999; // clamped to the real maximum on load
         return d;
     }
 }

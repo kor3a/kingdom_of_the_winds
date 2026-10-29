@@ -1,23 +1,75 @@
+using KotW.Shared;
+
 namespace KotW.ArtGen;
 
 // Monster strips: 3 frames side by side (walk A, walk B, attack), facing right.
 // The game flips them for left. Feet sit 2px above the bottom edge.
 public static class Monsters
 {
-    public static readonly Dictionary<string, (int W, int H, Func<int, Canvas> Draw)> All = new()
+    public static readonly Dictionary<string, (int W, int H, Func<int, Canvas> Draw)> All = Build();
+
+    private static Dictionary<string, (int W, int H, Func<int, Canvas> Draw)> Build()
     {
-        ["rabbit"] = (32, 32, Rabbit),
-        ["rat"] = (32, 32, Rat),
-        ["squirrel"] = (32, 32, Squirrel),
-        ["snake"] = (32, 32, Snake),
-        ["fox"] = (40, 32, Fox),
-        ["wolf"] = (48, 36, Wolf),
-        ["boar"] = (48, 36, Boar),
-        ["bat"] = (40, 36, Bat),
-        ["dokkaebi"] = (44, 52, Dokkaebi),
-        ["golem"] = (48, 52, Golem),
-        ["tiger"] = (88, 60, Tiger),
-    };
+        var all = new Dictionary<string, (int W, int H, Func<int, Canvas> Draw)>();
+        void Add(string id, Func<int, Canvas> draw) { var c = draw(0); all[id] = (c.W, c.H, draw); }
+        Add("rabbit", Rabbit); Add("rat", Rat); Add("squirrel", Squirrel); Add("snake", Snake); Add("fox", Fox);
+        Add("wolf", Wolf); Add("boar", Boar); Add("bat", Bat); Add("dokkaebi", Dokkaebi); Add("golem", Golem); Add("tiger", Tiger);
+
+        bool Eyes(Rgba px) => Pal.Sat(px) > 0.55 && px.R > 180 && (Pal.Hue(px) < 70 || Pal.Hue(px) > 330);
+        // Weeping Reed Marsh
+        Add("toad", f => Toad(f, "#6a8a3a"));
+        Add("reed_viper", Dyed(Snake, "#7a5a68", Eyes));
+        Add("bandit", Humanoid(new Look("#c89068", "#2a2a2a", "topknot", "mob_bandit", "mob_cudgel", "leather_cap")));
+        Add("wisp", f => Wisp(f, "#50b8ff"));
+        Add("bandit_chief", Humanoid(new Look("#c08060", "#1a1a1a", "topknot", "mob_bandit", "bronze_hwando", "bronze_helm"), 1.25));
+        // Saltwind Coast and the drowned shrine
+        Add("crab", f => Crab(f, "#d85a3a"));
+        Add("sea_snake", Dyed(Snake, "#3a8a9a", Eyes));
+        Add("pirate", Humanoid(new Look("#c89068", "#3a2a1a", "long", "mob_pirate", "mob_cutlass")));
+        Add("drowned", Humanoid(new Look("#c0d0c8", "#2a3a30", "long", "npc_sailor"), ghost: "#90b8b0"));
+        Add("coral_golem", Dye(Golem, "#d87868", "#80f0ff"));
+        Add("abyss_eel", Big(Dyed(Snake, "#2a3a58", Eyes), 1.25));
+        Add("water_ghost", Humanoid(new Look("#e0e8f0", "#101418", "long", "npc_priest"), ghost: "#a8c8f0"));
+        Add("dragon_guard", Humanoid(new Look("#a0c8c0", "#1a3a3a", "topknot", "mob_dragon_guard", "mob_trident", "steel_helm")));
+        Add("imugi", Big(Dyed(Snake, "#2a7a6a", Eyes), 2.5));
+        // Cinder Highlands
+        Add("ash_boar", Dyed(Boar, "#6a625c", Eyes));
+        Add("fire_dokkaebi", Turned(Dokkaebi, 28, 1.1, 1.15));
+        Add("ember_bat", Turned(Bat, 100, 1.4, 1.2));
+        Add("lava_golem", Dye(Golem, "#3a3236", "#ff7020"));
+        Add("cultist", Humanoid(new Look("#d0b098", "#1a1a1a", "topknot", "mob_cultist", "mob_storm_staff", "mob_cult_hood")));
+        Add("bulgasari", Big(Dyed(Boar, "#4a525e", px => px.R > 200 && px.G > 190), 2.0));
+        // Frostfang Pass
+        Add("snow_wolf", Dyed(Wolf, "#e0eaff", Eyes));
+        Add("frost_bat", Dyed(Bat, "#a8d0f8", Eyes));
+        Add("ice_dokkaebi", Turned(Dokkaebi, 190, 0.6, 1.2));
+        Add("ice_golem", Dye(Golem, "#b8d8f0", "#40a0ff"));
+        Add("cult_adept", Humanoid(new Look("#d0b098", "#e0e0e8", "long", "mob_cultist", "storm_staff", "scholar_gat")));
+        Add("white_tiger", Dyed(Tiger, "#e8eef8"));
+        // Moonlit Bamboo Grove
+        Add("moon_rabbit", Dyed(Rabbit, "#fff0c8"));
+        Add("grove_toad", f => Toad(f, "#3a7a68"));
+        Add("moon_fox", Dyed(Fox, "#d8dcf0"));
+        Add("egg_ghost", EggGhost);
+        Add("fox_maiden", Humanoid(new Look("#f8e0d0", "#e8a8c8", "long", "npc_fox", "spirit_fan")));
+        Add("gumiho", Gumiho);
+        // Road of the Yellow Springs
+        Add("plague_rat", Big(Dyed(Rat, "#6a7a50", Eyes), 1.2));
+        Add("grave_wisp", f => Wisp(f, "#ff5a80"));
+        Add("ghost_soldier", Humanoid(new Look("#c0c8d0", "#202020", "topknot", "lamellar", "steel_glaive", "iron_helm"), ghost: "#a0b0d8"));
+        Add("reaper", Humanoid(new Look("#e4e4ec", "#101010", "long", "mob_reaper", "mob_scythe", "npc_gat")));
+        Add("lantern_judge", Humanoid(new Look("#e8c8a0", "#101010", "topknot", "mob_judge", "mob_scythe", "mob_red_gat"), 2.0));
+        // Ruins of the Sky Palace and the Eye of the Winds
+        Add("thunder_crane", f => Crane(f, "#f0f4ff", "#60e0ff"));
+        Add("heavenly_guard", Humanoid(new Look("#f0d0b0", "#1a1a1a", "topknot", "mob_heaven_guard", "heavenpiercer", "celestial_helm")));
+        Add("haetae", Dyed(Tiger, "#a8a294"));
+        Add("sky_sentinel", Dye(Golem, "#e8e0d0", "#f0c040"));
+        Add("thunder_roc", Big(f => Crane(f, "#3a4060", "#80a0ff"), 2.2));
+        Add("storm_wisp", f => Wisp(f, "#9080ff"));
+        Add("storm_wraith", Humanoid(new Look("#a0a0c0", "#101018", "long", "mob_cultist", "mob_storm_staff"), ghost: "#9a88d8"));
+        Add("heuk_un", Humanoid(new Look("#e8d0c0", "#e0e0f0", "long", "mob_heukun", "storm_eye_glaive", "scholar_gat"), 2.0, aura: "#8060ff"));
+        return all;
+    }
 
     public static Canvas Strip(string id)
     {
@@ -353,5 +405,206 @@ public static class Monsters
         }
         else c.Line(hx + 5, hy + 8, hx + 11, hy + 7, k);
         return Finish(c, "#2a1208");
+    }
+
+    // ---- variants: palette swaps, enlargements and humanlike foes -------------------
+
+    // Re-dyes a whole sprite onto one colour ramp, keeping whatever `keep` picks (usually the eyes).
+    private static Func<int, Canvas> Dyed(Func<int, Canvas> draw, string hex, Func<Rgba, bool>? keep = null)
+    {
+        var ramp = Pal.Ramp(hex);
+        return f => { var c = draw(f); c.Map(px => keep != null && keep(px) ? px : Pal.Onto(px, ramp)); return c; };
+    }
+
+    // Dyes the dull parts one colour and the vivid parts (glowing cracks, tusks, moss) another.
+    private static Func<int, Canvas> Dye(Func<int, Canvas> draw, string body, string accent)
+    {
+        var (b, a) = (Pal.Ramp(body), Pal.Ramp(accent));
+        return f => { var c = draw(f); c.Map(px => Pal.Onto(px, Pal.Sat(px) > 0.4 && px.R + px.G + px.B > 200 ? a : b)); return c; };
+    }
+
+    private static Func<int, Canvas> Turned(Func<int, Canvas> draw, double dh, double sat = 1, double val = 1) =>
+        f => { var c = draw(f); c.Map(px => Pal.Rotate(px, dh, sat, val)); return c; };
+
+    private static Func<int, Canvas> Big(Func<int, Canvas> draw, double k) => f => draw(f).Scaled(k);
+
+    // A paper-doll person facing right: two walk frames and the weapon's strike frame.
+    // ghost washes them pale and see-through; aura sets a glow behind them.
+    private static Func<int, Canvas> Humanoid(Look look, double scale = 1, string? ghost = null, string? aura = null) => f =>
+    {
+        var c = People.Doll(look, Dir.Right, f switch { 0 => 1, 1 => 3, _ => 5 });
+        if (ghost != null)
+        {
+            var ramp = Pal.Ramp(ghost);
+            c.Map(px => Pal.Onto(px, ramp).WithA((byte)(px.A * 0.78)));
+        }
+        if (aura != null)
+        {
+            var glow = new Canvas(c.W, c.H);
+            glow.Glow(16, 30, 16, Pal.Hex(aura), 110);
+            c.BlitUnder(glow);
+        }
+        return scale == 1 ? c : c.Scaled(scale);
+    };
+
+    private static Canvas Toad(int f, string hex)
+    {
+        var c = new Canvas(36, 28);
+        var g = Pal.Ramp(hex);
+        var belly = Pal.Ramp("#d8d0a0");
+        int hop = f == 1 ? -2 : 0, dx = f == 2 ? 2 : 0;
+        c.Shaded(9 + dx, 22, 5.5, 3.5, g);
+        c.Shaded(18 + dx, 18 + hop, 11, 7, g, 0.05);
+        c.Shaded(20 + dx, 22.5 + hop, 8, 2.6, belly);
+        c.Shaded(25 + dx, 24.5, 2, 2.4, g);
+        var rng = new Mulberry32(77);
+        for (int i = 0; i < 7; i++) c.Ellipse(10 + rng.Next() * 14 + dx, 14 + rng.Next() * 6 + hop, 1.3, 1, g[1]);
+        foreach (var ex in new[] { 21.0, 26.0 })
+        {
+            c.Shaded(ex + dx, 11.5 + hop, 2.6, 2.6, g, 0.2);
+            c.Rect((int)ex - 1 + dx, 10 + hop, 2, 2, Pal.Hex("#f0c040"));
+            c.Set((int)ex + dx, 11 + hop, Pal.Hex("#101010"));
+        }
+        c.Line(22 + dx, 16.5 + hop, 30 + dx, 15.5 + hop, g[0]);
+        if (f == 2) { c.Line(30 + dx, 15.5, 35, 14, Pal.Hex("#e86080"), 1.4); c.Shaded(35, 14, 1.2, 1.2, Pal.Ramp("#e86080")); }
+        return Finish(c, "#1a2410");
+    }
+
+    private static Canvas Crab(int f, string hex)
+    {
+        var c = new Canvas(40, 30);
+        var r = Pal.Ramp(hex);
+        int a = f == 1 ? 1 : 0;
+        for (int i = 0; i < 3; i++)
+        {
+            double lx = 12 + i * 3, rx = 28 - i * 3;
+            c.Line(lx, 20, lx - 5, 26 - ((i + a) % 2), r[1], 1.4);
+            c.Line(rx, 20, rx + 5, 26 - ((i + a + 1) % 2), r[1], 1.4);
+        }
+        c.Shaded(20, 18, 11, 6.5, r, 0.05);
+        c.Line(12, 15, 28, 15, r[3]);
+        double reach = f == 2 ? 5 : 0;
+        c.Line(12, 16, 7, 11 - a, r[2], 2.2);
+        c.Line(28, 16, 33 + reach, 11 - a, r[2], 2.2);
+        foreach (var (cx, cy, open) in new[] { (6.0, 8.0 - a, 0.0), (34 + reach, 8.0 - a, reach > 0 ? 1.5 : 0) })
+        {
+            c.Shaded(cx, cy, 3.6, 3, r, 0.15);
+            c.Poly(new (double, double)[] { (cx - 1, cy - 2 - open), (cx + 1.5, cy - 5 - open), (cx + 2.5, cy - 2) }, r[2]);
+        }
+        foreach (var ex in new[] { 17, 23 })
+        {
+            c.Line(ex, 13, ex, 10, r[1]);
+            c.Rect(ex - 1, 8, 2, 2, Pal.Hex("#101010")); c.Set(ex - 1, 8, Pal.Hex("#ffffff"));
+        }
+        return Finish(c, "#3a1008");
+    }
+
+    // Dokkaebi fire and its cousins: a flickering teardrop flame with a white-hot core and a halo.
+    private static Canvas Wisp(int f, string hex)
+    {
+        var c = new Canvas(34, 42);
+        var m = Pal.Ramp(hex);
+        double sway = f == 1 ? 2 : f == 2 ? -2 : 0;
+        void Flame(double cx, double baseY, double r, double tipY, double lean, Rgba col)
+        {
+            c.Ellipse(cx, baseY, r, r, col);
+            c.Poly(new (double, double)[] { (cx - r * 0.95, baseY - 1), (cx + lean, tipY), (cx + r * 0.95, baseY - 1) }, col);
+        }
+        Flame(10, 27, 3.5, 14, -3 + sway * 0.5, m[1]);
+        Flame(24, 27, 3.5, 15, 3 + sway * 0.5, m[1]);
+        Flame(17, 28, 8, 4, sway, m[2]);
+        Flame(17, 29, 5.5, 11, sway * 0.6, m[3]);
+        Flame(17, 30, 3.2, 19, sway * 0.3, m[4]);
+        c.Ellipse(17, 30.5, 1.6, 2, Pal.Hex("#ffffff"));
+        c.Rect(13, 27, 2, 2, m[0]); c.Rect(19, 27, 2, 2, m[0]);
+        if (f == 2) c.Rect(15, 32, 4, 1, m[0]);
+        c.Map(px => px.WithA(230));
+        var halo = new Canvas(c.W, c.H);
+        halo.Glow(17, 26, 17, m[3], 120);
+        c.Outline(_ => m[1].WithA(210));
+        c.BlitUnder(halo);
+        return c;
+    }
+
+    // A crane (and, enlarged and darkened, the thunder roc): legs, a long neck and spearing beak.
+    private static Canvas Crane(int f, string body, string accent)
+    {
+        var c = new Canvas(44, 46);
+        var w = Pal.Ramp(body);
+        var a = Pal.Ramp(accent);
+        var black = Pal.Ramp("#202028");
+        var beak = Pal.Ramp("#d8b040");
+        bool fly = f == 1;
+        int lunge = f == 2 ? 4 : 0;
+        if (!fly) { c.Line(18, 28, 17, 43, black[2], 1.2); c.Line(21, 28, 23, 43, black[2], 1.2); c.Line(14, 43, 20, 43, black[2]); c.Line(20, 43, 26, 43, black[2]); }
+        else { c.Line(17, 28, 12, 36, black[2], 1.2); c.Line(20, 28, 15, 37, black[2], 1.2); }
+        c.Poly(new (double, double)[] { (9, 22), (3, 27), (12, 26) }, black[2]);
+        c.Shaded(17, 23, 9, 6, w, 0.05);
+        var wing = fly
+            ? new (double, double)[] { (12, 20), (6, 4), (20, 2), (24, 19) }
+            : new (double, double)[] { (10, 19), (24, 18), (20, 26), (9, 25) };
+        c.Poly(wing, w[1]);
+        c.Poly(wing.Take(3).ToArray(), w[2]);
+        for (int i = 0; i < 4; i++) c.Set(fly ? 8 + i * 3 : 11 + i * 3, fly ? 4 + i * 2 : 24, black[2]);
+        for (int i = 0; i <= 12; i++)
+        {
+            double t = i / 12.0;
+            c.Shaded(24 + t * (6 + lunge) - Math.Sin(t * Math.PI) * 3, 20 - t * 12 + (lunge > 0 ? t * 6 : 0), 1.7, 1.7, w);
+        }
+        double hx = 30 + lunge, hy = lunge > 0 ? 14 : 8;
+        c.Shaded(hx, hy, 3, 2.6, w, 0.15);
+        c.Ellipse(hx - 0.5, hy - 2.2, 1.6, 1, a[3]);
+        c.Poly(new (double, double)[] { (hx + 2, hy - 0.8), (hx + 11, hy + 0.5), (hx + 2, hy + 1) }, beak[2]);
+        c.Set(hx + 0.5, hy - 0.5, Pal.Hex("#101010"));
+        if (accent != body) for (int i = 0; i < 4; i++) c.Set(13 + i * 4, 17 + (i % 2) * 6, a[4]);
+        return Finish(c, "#14141c");
+    }
+
+    // Dalgyal gwisin: a ghost whose face is as blank and smooth as an egg, long black hair, white robe.
+    private static Canvas EggGhost(int f)
+    {
+        var c = new Canvas(30, 44);
+        var w = Pal.Ramp("#f4f0e8");
+        var hair = Pal.Ramp("#16141c");
+        int bob = f == 1 ? -1 : 0;
+        int reach = f == 2 ? 3 : 0;
+        c.Rect(8, 12 + bob, 3, 20, hair[2]);
+        c.Poly(new (double, double)[] { (9, 22 + bob), (21, 22 + bob), (24, 40), (6, 40) }, w[2]);
+        for (int x = 6; x < 24; x += 3) c.Ellipse(x + 1.5, 40 + (x / 3 + f) % 2, 1.6, 1.4, w[2]);
+        c.Line(10, 24 + bob, 10, 38, w[1]);
+        c.Line(20, 26 + bob, 25 + reach, 30 + bob - reach, w[2], 2.2);
+        c.Shaded(15, 14 + bob, 6.5, 8.5, w, 0.2);
+        c.Rect(9, 7 + bob, 12, 3, hair[2]);
+        c.Rect(8, 9 + bob, 2, 14, hair[2]);
+        c.Set(17, 13 + bob, w[3]);
+        c.Map(px => px.WithA((byte)(px.A * 0.9)));
+        return Finish(c, "#3a3848");
+    }
+
+    // The nine-tailed fox: the red fox dyed moon-white and doubled, with nine tails fanned behind.
+    private static Canvas Gumiho(int f)
+    {
+        var c = new Canvas(104, 76);
+        var fur = Pal.Ramp("#f4ecd8");
+        var tip = Pal.Ramp("#ffffff");
+        var tails = new Canvas(c.W, c.H);
+        for (int k = 0; k < 9; k++)
+        {
+            double ang = (195 + k * 13 + (f == 1 ? 4 : 0)) * Math.PI / 180;
+            for (int i = 0; i <= 14; i++)
+            {
+                double t = i / 14.0, curl = Math.Sin(t * Math.PI) * 0.35;
+                double x = 30 + Math.Cos(ang + curl) * t * 30, y = 44 + Math.Sin(ang + curl) * t * 30;
+                tails.Shaded(x, y, 4.6 - t * 1.6, 4.6 - t * 1.6, t > 0.8 ? tip : fur, 0.1);
+            }
+        }
+        tails.Outline(_ => Pal.Hex("#7a5a40"));
+        c.Blit(tails, 0, 0);
+        var fox = Dyed(Fox, "#f4ecd8", px => Pal.Sat(px) > 0.55 && px.R < 90)(f).Scaled(2);
+        c.Blit(fox, 22, 10);
+        var aura = new Canvas(c.W, c.H);
+        aura.Glow(60, 40, 40, Pal.Hex("#ffb0d8"), 70);
+        c.BlitUnder(aura);
+        return c;
     }
 }

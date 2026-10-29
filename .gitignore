@@ -5,5 +5,8 @@ obj/
 *.user
 # Regenerated on every art build
 tools/ArtGen/preview.png
+tools/ArtGen/preview_gear.png
+tools/ArtGen/preview_monsters.png
+tools/ArtGen/preview_maps.png
 # iOS and other exports
 build/

@@ -6,11 +6,8 @@ namespace KotW.ArtGen;
 // 4 variants x 4 animation frames. Still tiles repeat the same image per frame.
 public static class Tiles
 {
-    // Drawn on a transparent background; the game puts the zone's ground tile underneath.
-    public const string Objects = "TPBrLm";
-
     private const int T = 32;
-    private static readonly HashSet<char> Animated = new() { '~', 'S', 't', 'p', 'a', '=' };
+    private static readonly HashSet<char> Animated = new() { '~', 'S', 't', 'p', 'a', '=', 'l', 'V', 'y' };
 
     public static Canvas Atlas()
     {
@@ -43,6 +40,24 @@ public static class Tiles
             int x = r.Int(1, T - 4), y = r.Int(3, T - 2);
             c.Set(x, y, g[1]); c.Set(x + 1, y - 1, g[1]); c.Set(x + 1, y - 2, g[3]); c.Set(x + 2, y, g[1]); c.Set(x + 3, y - 1, g[3]);
         }
+    }
+
+    // A plain ground: base colour, speckles of its shadow and light, and a few larger flecks.
+    private static void Ground(Canvas c, Mulberry32 r, string hex, int specks = 40, int flecks = 3)
+    {
+        var g = Pal.Ramp(hex);
+        c.Rect(0, 0, T, T, g[2]);
+        Speckle(c, r, new[] { g[1], g[3] }, specks);
+        for (int i = 0; i < flecks; i++) { int x = r.Int(2, T - 5), y = r.Int(2, T - 4); c.Rect(x, y, 3, 1, g[3]); c.Rect(x, y + 1, 3, 1, g[1]); }
+    }
+
+    // Draws an object on its own layer and outlines it, so it sits on any ground.
+    private static void Prop(Canvas c, Action<Canvas> draw)
+    {
+        var o = new Canvas(T, T);
+        draw(o);
+        o.Outline();
+        c.Blit(o, 0, 0);
     }
 
     private static void Dirt(Canvas c, Mulberry32 r)
@@ -374,6 +389,196 @@ public static class Tiles
                 c.Rect(0, 2, T, 2, wood[0]); c.Rect(0, 28, T, 2, wood[0]);
                 break;
             }
+            case 's':
+            {
+                Ground(c, r, "#e0cc98", 50, 2);
+                var d = Pal.Ramp("#e0cc98");
+                for (int i = 0; i < 3; i++) { int y = r.Int(4, 28); for (int x = 0; x < T; x++) if ((x + i * 5) % 9 < 5) c.Set(x, y + (int)Math.Round(Math.Sin(x / 3.0)), d[3]); }
+                if (v == 3) { c.Rect(20, 12, 3, 2, Pal.Hex("#f4e8e0")); c.Set(21, 11, Pal.Hex("#e8a8a0")); }
+                break;
+            }
+            case 'v':
+                Prop(c, o =>
+                {
+                    var g = Pal.Ramp("#8a9a4a");
+                    for (int i = 0; i < 9; i++)
+                    {
+                        int x = 4 + i * 3 + r.Int(-1, 1), top = r.Int(3, 12);
+                        o.Line(x, 30, x + r.Int(-2, 2), top, g[i % 3 + 1]);
+                        if (i % 3 == 0) { o.Rect(x - 1 + r.Int(-1, 1), top - 1, 2, 5, Pal.Ramp("#7a5030")[2]); }
+                    }
+                });
+                break;
+            case 'z': Ground(c, r, "#56603a", 50, 4); Speckle(c, r, new[] { Pal.Hex("#3a4a3a") }, 6, 2); break;
+            case 'd':
+            {
+                var wood = Pal.Ramp("#a07850");
+                c.Rect(0, 0, T, T, wood[0]);
+                for (int y = 0; y < T; y += 8) { c.Rect(0, y + 1, T, 6, wood[2]); c.Rect(0, y + 1, T, 1, wood[3]); c.Set(r.Int(2, 28), y + 4, wood[1]); }
+                c.Rect(v * 7 + 3, 0, 1, T, wood[1]);
+                break;
+            }
+            case 'o':
+                Prop(c, o =>
+                {
+                    var p = Pal.Ramp(new[] { "#f07870", "#f0a060", "#e868a8", "#f07870" }[v]);
+                    o.Line(16, 30, 16, 12, p[2], 2.6);
+                    o.Line(16, 22, 9, 13, p[2], 2.2); o.Line(16, 19, 23, 9, p[2], 2.2); o.Line(10, 14, 7, 7, p[2], 1.8); o.Line(22, 10, 26, 5, p[3], 1.8);
+                    foreach (var (x, y) in new[] { (7, 7), (26, 5), (16, 11), (9, 13) }) o.Shaded(x, y, 1.6, 1.6, p, 0.2);
+                });
+                break;
+            case 'h':
+            {
+                Ground(c, r, "#5a5250", 46, 3);
+                if (v == 1) { int x = r.Int(3, 18), y = r.Int(6, 24); c.Line(x, y, x + 6, y + 2, Pal.Hex("#8a3020")); c.Set(x + 3, y + 1, Pal.Hex("#e06020")); }
+                break;
+            }
+            case 'l':
+            {
+                var m = Pal.Ramp("#e85020");
+                c.Rect(0, 0, T, T, m[1]);
+                for (int i = 0; i < 6; i++)
+                {
+                    int x = (r.Int(0, 28) + frame * 2) % 30, y = r.Int(2, 28);
+                    c.Ellipse(x, y, 4, 2.5, m[2]);
+                    c.Ellipse(x, y, 2, 1, m[3]);
+                }
+                c.Rect(r.Int(4, 26), (frame * 7 + v * 5) % 28 + 2, 2, 2, Pal.Hex("#fff0a0"));
+                break;
+            }
+            case 'O':
+                Shadow(c, 16, 26, 12, 4);
+                Prop(c, o =>
+                {
+                    var b = Pal.Ramp("#3a3640");
+                    o.Poly(new (double, double)[] { (6, 28), (9, 9), (15, 4), (22, 7), (27, 28) }, b[2]);
+                    o.Poly(new (double, double)[] { (6, 28), (9, 9), (15, 4), (14, 28) }, b[3]);
+                    o.Line(15, 5, 16, 27, b[1]);
+                    o.Line(20, 9, 24, 27, b[1]);
+                });
+                break;
+            case 'n':
+            {
+                Ground(c, r, "#e8eef6", 30, 2);
+                var sn = Pal.Ramp("#e8eef6");
+                for (int i = 0; i < 4; i++) { int x = r.Int(2, 26), y = r.Int(3, 28); c.Rect(x, y, 4, 1, sn[1]); c.Rect(x + 1, y - 1, 2, 1, sn[4]); }
+                break;
+            }
+            case 'Y':
+            {
+                Shadow(c, 16, 28, 10, 3.5);
+                var bark = Pal.Ramp("#5a3c28");
+                c.Rect(14, 24, 4, 7, bark[2]);
+                var n = Pal.Ramp("#2a5a48");
+                var snow = Pal.Ramp("#f4f8ff");
+                var crown = new Canvas(T, T);
+                foreach (var (top, half, bottom) in new[] { (13, 13.0, 26), (7, 10.0, 19), (1, 7.0, 12) })
+                {
+                    crown.Poly(new (double, double)[] { (16, top), (16 + half, bottom), (16 - half, bottom) }, n[2]);
+                    crown.Poly(new (double, double)[] { (16, top), (16 + half, bottom), (16 + half * 0.5, bottom) }, n[1]);
+                    crown.Poly(new (double, double)[] { (16, top), (16 + half * 0.55, top + (bottom - top) * 0.5), (16 - half * 0.7, top + (bottom - top) * 0.6) }, snow[2]);
+                    for (int x = (int)(16 - half) + 1; x < 16 + half; x += 4) crown.Rect(x, bottom - 1, 2, 1, snow[3]);
+                }
+                crown.Outline();
+                c.Blit(crown, 0, 0);
+                break;
+            }
+            case 'i':
+            {
+                var ice = Pal.Ramp("#a8d4ec");
+                c.Rect(0, 0, T, T, ice[2]);
+                Speckle(c, r, new[] { ice[3] }, 16);
+                c.Line(r.Int(0, 10), r.Int(0, 31), r.Int(20, 31), r.Int(0, 31), ice[1]);
+                c.Line(r.Int(4, 12), 4, r.Int(14, 28), 10, ice[4]);
+                c.Line(r.Int(4, 12), 22, r.Int(14, 28), 26, ice[4]);
+                break;
+            }
+            case 'b':
+                Shadow(c, 16, 28, 11, 3);
+                Prop(c, o =>
+                {
+                    var g = Pal.Ramp("#4a9a4a");
+                    var leaf = Pal.Ramp("#3a7a3a");
+                    foreach (var x in new[] { 7 + v % 2, 15, 23 - v % 3 })
+                    {
+                        o.Rect(x, 1, 3, 30, g[2]); o.Rect(x, 1, 1, 30, g[3]); o.Rect(x + 2, 1, 1, 30, g[1]);
+                        for (int y = 4 + x % 5; y < 30; y += 8) o.Rect(x, y, 3, 1, g[0]);
+                        o.Poly(new (double, double)[] { (x + 2, 6 + x % 7), (x + 9, 3 + x % 7), (x + 3, 8 + x % 7) }, leaf[2]);
+                    }
+                });
+                break;
+            case 'j':
+                Shadow(c, 16, 28, 9, 3);
+                Prop(c, o =>
+                {
+                    var b = Pal.Ramp("#5a4a40");
+                    o.Line(16, 30, 15, 8, b[2], 3.4);
+                    o.Line(15, 16, 7, 8, b[2], 1.8); o.Line(15, 12, 24, 5, b[2], 1.8); o.Line(8, 9, 5, 3, b[1], 1.2); o.Line(22, 6, 26, 9, b[1], 1.2);
+                    o.Line(14, 28, 14, 10, b[3]);
+                });
+                break;
+            case 'u':
+            {
+                Ground(c, r, "#6a5a48", 36, 2);
+                var y = Pal.Ramp("#c8a040");
+                if (v % 2 == 0) for (int i = 0; i < 3; i++) c.Set(r.Int(2, 29), r.Int(2, 29), y[3]);
+                break;
+            }
+            case 'y':
+                Shadow(c, 16, 29, 7, 2.5);
+                Prop(c, o =>
+                {
+                    var pole = Pal.Ramp("#3a3038");
+                    o.Rect(15, 10, 2, 20, pole[2]);
+                    o.Rect(11, 8, 10, 2, pole[2]);
+                    var glow = Pal.Ramp(frame % 2 == 0 ? "#ff6080" : "#ff8098");
+                    o.Ellipse(12, 15, 3, 4, glow[2]); o.Ellipse(12, 14, 1.6, 2.4, glow[4]);
+                    o.Ellipse(20, 15, 3, 4, glow[2]); o.Ellipse(20, 14, 1.6, 2.4, glow[4]);
+                    o.Line(12, 10, 12, 11, pole[1]); o.Line(20, 10, 20, 11, pole[1]);
+                });
+                c.Ellipse(16, 15, 12, 10, Pal.Hex("#ff6080").WithA(36));
+                break;
+            case 'k':
+            {
+                var cl = Pal.Ramp("#e8ecf8");
+                c.Rect(0, 0, T, T, cl[2]);
+                for (int i = 0; i < 6; i++) c.Shaded(r.Int(0, 31), r.Int(0, 31), r.Int(4, 8), r.Int(3, 5), cl, 0.1);
+                break;
+            }
+            case 'V':
+            {
+                var sky = Pal.Ramp("#6a90d8");
+                for (int y = 0; y < T; y++) c.Rect(0, y, T, 1, y < 16 ? sky[2] : sky[1]);
+                for (int i = 0; i < 2; i++)
+                {
+                    int x = (r.Int(0, 31) + frame * 3) % 40 - 6, y = r.Int(4, 26);
+                    c.Ellipse(x, y, 6, 2, Pal.Hex("#ffffff").WithA(110));
+                }
+                break;
+            }
+            case 'M':
+            {
+                var m = Pal.Ramp("#d8d4e0");
+                c.Rect(0, 0, T, T, m[1]);
+                foreach (var (x, y) in new[] { (0, 0), (16, 0), (0, 16), (16, 16) })
+                {
+                    c.Rect(x + 1, y + 1, 14, 14, m[2]); c.Rect(x + 1, y + 1, 14, 1, m[3]); c.Rect(x + 1, y + 1, 1, 14, m[3]);
+                }
+                c.Line(r.Int(2, 12), r.Int(2, 12), r.Int(10, 20), r.Int(14, 28), m[1]);
+                if (v == 2) c.Rect(6, 6, 20, 20, Pal.Hex("#c8a050").WithA(50));
+                break;
+            }
+            case 'I':
+                Shadow(c, 16, 28, 9, 3);
+                Prop(c, o =>
+                {
+                    var m = Pal.Ramp("#e0dcd0");
+                    o.Rect(10, 6, 12, 22, m[2]); o.Rect(10, 6, 3, 22, m[3]); o.Rect(19, 6, 3, 22, m[1]);
+                    for (int x = 14; x < 19; x += 2) o.Rect(x, 6, 1, 22, m[1]);
+                    o.Rect(8, 2, 16, 4, m[2]); o.Rect(8, 2, 16, 1, m[4]); o.Rect(8, 27, 16, 3, m[1]);
+                    o.Rect(8, 3, 16, 1, Pal.Hex("#c03a30"));
+                });
+                break;
             default: Grass(c, r); break;
         }
     }
