@@ -1,0 +1,7 @@
+# Godot editor cache and .NET build output
+client/.godot/
+bin/
+obj/
+*.user
+# Regenerated on every art build
+tools/ArtGen/preview.png

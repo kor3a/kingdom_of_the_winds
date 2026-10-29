@@ -1,0 +1,13 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>KotW</RootNamespace>
+  </PropertyGroup>
+  <!-- The game rules live in ../shared so the future server can compile the same files. -->
+  <ItemGroup>
+    <Compile Include="..\shared\*.cs" LinkBase="shared" />
+  </ItemGroup>
+</Project>
