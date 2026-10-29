@@ -8,6 +8,27 @@ public static class Ui
     public static readonly Color Gold = Assets.C("#d8b25a"), GoldHi = Assets.C("#f4d88a"), Ink = Assets.C("#e9e2cc"),
         Muted = Assets.C("#9a94a8"), Good = Assets.C("#7ad88a"), Bad = Assets.C("#f07060"), Edge = Assets.C("#6a5530");
 
+    // Phones and tablets (or --touch on a desktop): on-screen controls, a compact HUD and no hover or keys.
+    public static bool Touch;
+
+    // Canvas units per window pixel, after the content scaling Main sets up for touch screens.
+    private static float CanvasPerPixel(Window root) => root.GetVisibleRect().Size.Y / Math.Max(1, DisplayServer.WindowGetSize().Y);
+
+    // The screen's safe area (clear of the notch and home bar) as canvas margins. Both sides take the larger
+    // inset, so the layout still fits when the phone is turned the other way up.
+    public static (float Side, float Top, float Bottom) SafeMargins(Window root)
+    {
+        if (!OS.HasFeature("mobile")) return (0, 0, 0);
+        var win = DisplayServer.WindowGetSize();
+        var safe = DisplayServer.GetDisplaySafeArea();
+        float k = CanvasPerPixel(root);
+        float side = Math.Max(safe.Position.X, win.X - safe.End.X);
+        return (side * k, safe.Position.Y * k, (win.Y - safe.End.Y) * k);
+    }
+
+    public static float KeyboardHeight(Window root) =>
+        OS.HasFeature("mobile") ? DisplayServer.VirtualKeyboardGetHeight() * CanvasPerPixel(root) : 0;
+
     public static StyleBoxFlat Box(string bg, string border, int bw = 2, int margin = 8)
     {
         var s = new StyleBoxFlat { BgColor = Assets.C(bg), BorderColor = Assets.C(border) };

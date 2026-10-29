@@ -90,7 +90,9 @@ public partial class GameView : Node2D
         Time += dt;
         var p = W.P;
         // Camera follows the player, nudged so they sit in the middle of the uncovered play area.
-        float zoom = Mathf.Clamp(Mathf.Round(GetViewportRect().Size.Y / 360f), 2, 4);
+        // Touch screens show about nine rows of tiles: whole-number zoom would leave too few on a phone.
+        float h = GetViewportRect().Size.Y;
+        float zoom = Ui.Touch ? Mathf.Max(1, h / 300f) : Mathf.Clamp(Mathf.Round(h / 360f), 2, 4);
         Cam.Zoom = new Vector2(zoom, zoom);
         Cam.Offset = screenOffset / zoom;
         Cam.Position = Feet(p) - new Vector2(0, 14);

@@ -42,25 +42,10 @@ Sound.Music(Path.Combine(audio, "music", "cave.wav"), 196.0, 0.34, 0.22, false, 
 
 // A preview sheet of every outfit and monster, handy for judging the art at a glance.
 var preview = new Canvas(16 * 34, 3 * 50 + 70);
-string[] skins = { "#f2d0b0", "#f2c9a0", "#d9a070", "#a87048" };
 var looks = Content.Npcs.Values.Select(n => n.Look).Concat(Content.Folk.Select(f => f.Look)).Take(16).ToList();
 for (int i = 0; i < looks.Count; i++)
     for (int r = 0; r < 3; r++)
-    {
-        var d = new[] { Dir.Down, Dir.Right, Dir.Up }[r];
-        var l = looks[i];
-        var frame = new Canvas(32, 48);
-        void Layer(Canvas c, string tint) { if (tint != "") c.Map(px => Tint(px, Pal.Hex(tint))); frame.Blit(c, 0, 0); }
-        var weapon = l.Weapon != null ? People.Weapon(Content.Items[l.Weapon], d, 0) : null;
-        if (d == Dir.Up && weapon != null) frame.Blit(weapon, 0, 0);
-        Layer(People.Skin(d, 0), skins[i % 4] == "" ? l.Skin : l.Skin);
-        frame.Blit(People.Body(d, 0), 0, 0);
-        if (l.Armor != null) frame.Blit(People.Armor(Content.Items[l.Armor], d, 0), 0, 0);
-        Layer(People.Hair(l.Style, d, 0), l.Hair);
-        if (l.Helmet != null) frame.Blit(People.Helmet(Content.Items[l.Helmet], d, 0), 0, 0);
-        if (d != Dir.Up && weapon != null) frame.Blit(weapon, 0, 0);
-        preview.Blit(frame, i * 34, r * 50);
-    }
+        preview.Blit(Doll(looks[i], new[] { Dir.Down, Dir.Right, Dir.Up }[r]), i * 34, r * 50);
 int mx = 0;
 foreach (var id in Monsters.All.Keys)
 {
@@ -73,7 +58,46 @@ foreach (var id in Monsters.All.Keys)
 var big = new Canvas(preview.W * 3, preview.H * 3);
 for (int y = 0; y < big.H; y++) for (int x = 0; x < big.W; x++) big.P[y * big.W + x] = preview.Get(x / 3, y / 3).A == 0 ? Pal.Hex("#5f9a44") : preview.Get(x / 3, y / 3);
 big.Save(Path.Combine(client, "..", "tools", "ArtGen", "preview.png"));
+
+// The app icon (iPhone needs one; desktops show it on the window): a warrior on a path at dusk.
+var icon = new Canvas(1024, 1024);
+const int iconScale = 18, horizon = 820;
+for (int y = 0; y < icon.H; y++)
+    for (int x = 0; x < icon.W; x++)
+        icon.P[y * icon.W + x] = y < horizon ? Mix(Pal.Hex("#3e5288"), Pal.Hex("#141726"), y / (double)horizon)
+            : (y / 36 + x / 72) % 2 == 0 ? Pal.Hex("#5f9a44") : Pal.Hex("#4f8a3a");
+var hero = Doll(new Look("#f2c9a0", "#1a1a1a", "topknot", "lamellar", "iron_sword"), Dir.Down);
+int hx = (icon.W - hero.W * iconScale) / 2, hy = horizon + 90 - hero.H * iconScale;
+for (int y = 0; y < hero.H; y++)
+    for (int x = 0; x < hero.W; x++)
+    {
+        var px = hero.Get(x, y);
+        if (px.A == 0) continue;
+        for (int dy = 0; dy < iconScale; dy++)
+            for (int dx = 0; dx < iconScale; dx++)
+                icon.P[(hy + y * iconScale + dy) * icon.W + hx + x * iconScale + dx] = px with { A = 255 };
+    }
+icon.Save(Path.Combine(client, "icon.png"));
 Console.WriteLine("Done.");
+
+// One standing frame of a paper-doll character, layered the way client/scripts/Actor.cs draws it.
+static Canvas Doll(Look l, Dir d)
+{
+    var frame = new Canvas(32, 48);
+    void Layer(Canvas c, string tint) { if (tint != "") c.Map(px => Tint(px, Pal.Hex(tint))); frame.Blit(c, 0, 0); }
+    var weapon = l.Weapon != null ? People.Weapon(Content.Items[l.Weapon], d, 0) : null;
+    if (d == Dir.Up && weapon != null) frame.Blit(weapon, 0, 0);
+    Layer(People.Skin(d, 0), l.Skin);
+    frame.Blit(People.Body(d, 0), 0, 0);
+    if (l.Armor != null) frame.Blit(People.Armor(Content.Items[l.Armor], d, 0), 0, 0);
+    Layer(People.Hair(l.Style, d, 0), l.Hair);
+    if (l.Helmet != null) frame.Blit(People.Helmet(Content.Items[l.Helmet], d, 0), 0, 0);
+    if (d != Dir.Up && weapon != null) frame.Blit(weapon, 0, 0);
+    return frame;
+}
+
+static Rgba Mix(Rgba a, Rgba b, double t) =>
+    new((byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
 
 // Same maths as client/shaders/tint.gdshader, so the preview matches the game.
 static Rgba Tint(Rgba px, Rgba baseCol)
