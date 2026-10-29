@@ -122,7 +122,7 @@ public partial class Main : Node2D
         // Drop directions whose keys were released (also covers releases eaten by the chat box).
         _held.RemoveAll(d => typing || !DirKeys.Any(k => k.Dir == d && Input.IsPhysicalKeyPressed(k.Key)));
         if (typing || !Input.IsPhysicalKeyPressed(Key.Space)) _attack = false;
-        bool ready = _world.P.MoveT >= 1;
+        double moveT = _world.P.MoveT;
         var input = new TickInput
         {
             Dir = _held.Count > 0 ? _held[^1] : _hud.Pad?.Held ?? _tap,
@@ -130,10 +130,13 @@ public partial class Main : Node2D
             Attack = _attack || _attackFresh || _hud.Pad?.Attacking == true,
             AttackFresh = _attackFresh,
         };
-        if (ready) { _tap = null; _fresh = false; }
         _attackFresh = false;
 
         _world.Update(dt, input);
+        // A tap is spent once the player could act on it: they stood still, or a step ended and the
+        // next began within this tick. Walking keeps MoveT below 1 between ticks, so checking only
+        // before the tick let a tap made mid-walk outlive its key and walk the player on forever.
+        if (_world.P.MoveT >= 1 || _world.P.MoveT < moveT) { _tap = null; _fresh = false; }
         foreach (var e in _world.Drain())
         {
             _overlay.OnEvent(e);
