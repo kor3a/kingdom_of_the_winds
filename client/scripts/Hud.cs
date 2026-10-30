@@ -257,7 +257,8 @@ public partial class Hud : Control
         _mapBody.Visible = !_mapBody.Visible;
         _mapBtn.Text = _mapBody.Visible ? "–" : "+";
         _mapBtn.TooltipText = _mapBody.Visible ? "Hide the map (N)" : "Show the map (N)";
-        _mapPanel.ResetSize();
+        // Fit the height to what's showing but keep the full width, so the button stays in the top-right corner.
+        _mapPanel.Size = new Vector2(MapW, 0);
     }
 
     // Phones: small panels in the top corners, the on-screen controls along the bottom and the chat between them.
@@ -578,13 +579,16 @@ public partial class Hud : Control
         var bag = _open["inventory"];
         float x = bag.Position.X - WinW - 8;
         if (x < 12 || _shopId != null || _open.ContainsKey("storage")) return;
-        if (!_open.ContainsKey("stats")) { Open("stats", "Character", RenderStats); _statsWithBag = true; }
+        if (!_open.ContainsKey("stats")) { _statsWithBag = true; Open("stats", "Character", RenderStats); }
         _open["stats"].Position = new Vector2(x, bag.Position.Y);
     }
 
     private void Open(string id, string title, Action<VBoxContainer> render, bool right = false, int width = WinW, float top = 12)
     {
         Close(id);
+        if (Ui.Touch)
+            foreach (var other in _open.Keys.ToList())
+                if (!OpenTogether(id, other)) Close(other);
         var win = new GameWindow(title, () => Close(id)) { Render = render };
         win.CustomMinimumSize = new Vector2(width, 0);
         _windows.AddChild(win);
@@ -597,6 +601,12 @@ public partial class Hud : Control
         Refresh(win, true);
         Audio.Play("ui");
     }
+
+    // Phones have room for one window at a time, so opening one shuts the rest, except for an item's details (which sit on
+    // top of the window they came from), the bag beside a shop or storage, and the character sheet the bag opens beside it.
+    private bool OpenTogether(string opening, string other) => opening == "item"
+        || (opening, other) is ("inventory", "shop" or "storage") or ("shop" or "storage", "inventory")
+        || (opening, other) is ("stats", "inventory") && _statsWithBag;
 
     public void Close(string id)
     {
