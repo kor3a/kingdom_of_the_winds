@@ -3,34 +3,37 @@ using KotW.Shared;
 
 namespace KotW;
 
-// The in-game interface: status panel, hotbar, chat, minimap and pop-up windows.
+// The in-game interface: status bar, hotbar, chat, minimap and pop-up windows.
 // Buttons call World methods; the HUD never changes game state itself.
 public partial class Hud : Control
 {
-    public const int SideW = 236, BottomH = 182;
+    // Desktop: the status bar along the bottom, the hotbar row above it, the map and chat panels on the right.
+    public const int BarH = 56, HotH = 72, MapW = 240, ChatW = 360, WinW = 330;
     public World W = null!;
     public AudioBox Audio = null!;
     public LineEdit ChatInput = null!;
     public TouchControls? Pad; // on-screen controls, on touch screens only
+    public bool ChatOpen { get; private set; }
 
     // Where the camera centres the player: the middle of the area the HUD leaves uncovered.
-    public Vector2 CameraNudge => Ui.Touch ? Vector2.Zero : new Vector2(SideW / 2f, BottomH / 2f);
+    public Vector2 CameraNudge => Ui.Touch ? Vector2.Zero : new Vector2(0, (BarH + HotH) / 2f);
 
     private RichTextLabel _chat = null!;
     private Label _name = null!, _class = null!, _gold = null!, _zone = null!, _coords = null!, _buffs = null!;
-    private Label _tName = null!, _tLevel = null!, _tStatus = null!, _tEmpty = null!;
+    private Label _tName = null!, _tLevel = null!, _tStatus = null!, _unread = null!;
     private StatBar _hp = null!, _mp = null!, _exp = null!, _tBar = null!;
-    private Button _statsBtn = null!, _musicBtn = null!;
-    private Container _hotbar = null!;
+    private Button _statsBtn = null!, _musicBtn = null!, _mapBtn = null!;
+    private Container _hotbar = null!, _feed = null!;
     private Minimap _minimap = null!;
-    private Control _safe = null!, _windows = null!, _target = null!, _chatPanel = null!;
+    private Control _safe = null!, _windows = null!, _target = null!, _chatPanel = null!, _mapPanel = null!, _mapBody = null!;
     private Label _banner = null!;
     private double _bannerT, _refreshT;
     private string _hotbarSig = "", _lastWarn = "";
     private ulong _lastWarnAt;
+    private int _unreadCount;
+    private bool _statsWithBag; // the character sheet was opened alongside the bag, and closes with it
     private readonly Dictionary<string, GameWindow> _open = new();
     private string? _dialogNpc, _shopId;
-    private int _z;
 
     public override void _Ready()
     {
@@ -43,10 +46,10 @@ public partial class Hud : Control
         AddChild(_safe);
         MakeWidgets();
         if (Ui.Touch) BuildTouch();
-        else { BuildSide(); BuildBottom(); }
+        else { BuildBar(); BuildHotbar(); BuildMap(); BuildChat(); }
         _windows = new Control { MouseFilter = MouseFilterEnum.Ignore };
         _windows.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        if (!Ui.Touch) { _windows.OffsetRight = -SideW; _windows.OffsetBottom = -BottomH; }
+        if (!Ui.Touch) _windows.OffsetBottom = -(BarH + HotH);
         _safe.AddChild(_windows);
         _banner = Ui.Label("", Ui.GoldHi, 30);
         _banner.HorizontalAlignment = HorizontalAlignment.Center;
@@ -59,11 +62,11 @@ public partial class Hud : Control
     }
 
     // ---- layout -----------------------------------------------------------------------
-    // The widgets are the same on every screen; BuildSide/BuildBottom and BuildTouch only arrange them.
+    // The widgets are the same on every screen; the Build methods only arrange them.
     private void MakeWidgets()
     {
-        _name = Ui.Label("", Ui.GoldHi, Ui.Touch ? 16 : 19);
-        _class = Ui.Label("");
+        _name = Ui.Label("", Ui.GoldHi, Ui.Touch ? 16 : 17);
+        _class = Ui.Label("", null, Ui.Touch ? 15 : 13);
         _buffs = Ui.Label("", Assets.C("#f0c8ff"), 17);
         _hp = new StatBar { Fill = Assets.C("#d84838") };
         _mp = new StatBar { Fill = Assets.C("#3a78d8") };
@@ -71,15 +74,13 @@ public partial class Hud : Control
         _gold = Ui.Label("", Ui.GoldHi);
 
         var target = new PanelContainer();
-        target.AddThemeStyleboxOverride("panel", Ui.Box("#0c0e16", "#3a3020", 1, 6));
-        target.CustomMinimumSize = new Vector2(0, Ui.Touch ? 0 : 78);
+        target.AddThemeStyleboxOverride("panel", Ui.Box("#0c0e16d8", "#6a5530", 1, 6));
         var tv = Ui.VBox(2);
-        _tEmpty = Ui.Label("No target · Tab to select", Ui.Muted, 14);
         _tName = Ui.Label("", Assets.C("#ffb0a0"));
         _tLevel = Ui.Label("", Ui.Muted, 13);
         _tBar = new StatBar { Fill = Assets.C("#d84838") };
         _tStatus = Ui.Label("", Assets.C("#b0e890"), 13);
-        target.AddChild(tv.With(_tEmpty, _tName, _tLevel, _tBar, _tStatus));
+        target.AddChild(tv.With(_tName, _tLevel, _tBar, _tStatus));
         _target = target;
         _zone = Ui.Label("", Assets.C("#90e0ff"), 15);
         _minimap = new Minimap { CustomMinimumSize = new Vector2(0, 150) };
@@ -89,7 +90,7 @@ public partial class Hud : Control
         _chat.AddThemeFontSizeOverride("normal_font_size", Ui.Touch ? 12 : 14);
         ChatInput = new LineEdit
         {
-            PlaceholderText = Ui.Touch ? "Tap to chat  ·  /s shout  ·  /w name whisper" : "Press Enter to chat  ·  /s shout  ·  /w name whisper  ·  /who",
+            PlaceholderText = Ui.Touch ? "Tap to chat  ·  /s shout  ·  /w name whisper" : "Say something  ·  /s shout  ·  /w name whisper",
             MaxLength = 120,
         };
         ChatInput.TextSubmitted += text =>
@@ -109,7 +110,8 @@ public partial class Hud : Control
         {
             var b = Ui.Button(Ui.Touch ? label : $"[{key}] {label}", a);
             b.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-            if (Ui.Touch) { b.CustomMinimumSize = new Vector2(0, 30); b.AddThemeFontSizeOverride("font_size", 13); }
+            b.AddThemeFontSizeOverride("font_size", 13);
+            if (Ui.Touch) b.CustomMinimumSize = new Vector2(0, 30);
             menu.AddChild(b);
             return b;
         }
@@ -122,19 +124,140 @@ public partial class Hud : Control
         return menu;
     }
 
-    private void BuildSide()
+    // A strip across the bottom of the screen: who you are, your bars and gold, and the chat button.
+    private void BuildBar()
     {
-        var panel = new PanelContainer();
-        panel.AnchorLeft = 1; panel.AnchorRight = 1; panel.AnchorBottom = 1;
-        panel.OffsetLeft = -SideW;
+        var bar = new PanelContainer { AnchorTop = 1, AnchorRight = 1, AnchorBottom = 1, OffsetTop = -BarH };
+        bar.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336f2", "#6a5530", 2, 6));
+        _safe.AddChild(bar);
+        var who = Ui.VBox(0).With(_name, _class);
+        who.CustomMinimumSize = new Vector2(170, 0);
+        who.Alignment = BoxContainer.AlignmentMode.Center;
+        _gold.CustomMinimumSize = new Vector2(130, 0);
+        _gold.VerticalAlignment = VerticalAlignment.Center;
+        var h = Ui.HBox(16).With(who);
+        foreach (var (label, sb) in new[] { ("HP", _hp), ("MP", _mp), ("EXP", _exp) })
+        {
+            sb.CustomMinimumSize = new Vector2(10, 20);
+            var row = Row(label, sb);
+            row.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+            row.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+            h.AddChild(row);
+        }
+        h.AddChild(_gold);
+        // The chat sits behind this button; a red badge counts the lines that arrived while it was shut.
+        var chatBtn = new Button { FocusMode = FocusModeEnum.None, CustomMinimumSize = new Vector2(48, 0), TooltipText = "Chat (Enter)" };
+        chatBtn.Pressed += ToggleChat;
+        var icon = new ChatIcon();
+        icon.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _unread = Ui.Label("", Colors.White, 11);
+        _unread.AddThemeStyleboxOverride("normal", Ui.Box("#c83828", "#000000", 0, 2));
+        _unread.HorizontalAlignment = HorizontalAlignment.Center;
+        _unread.Position = new Vector2(32, -8);
+        _unread.Visible = false;
+        h.AddChild(chatBtn.With(icon, _unread));
+        bar.AddChild(h);
+
+        // Buffs float in the top-left corner and the target's health at the top centre, both clear of the map.
+        _buffs.Position = new Vector2(12, 10);
+        _buffs.AddThemeConstantOverride("outline_size", 5);
+        _buffs.AddThemeColorOverride("font_outline_color", Colors.Black);
+        _safe.AddChild(_buffs);
+        _target.AnchorLeft = 0.5f; _target.AnchorRight = 0.5f;
+        _target.OffsetLeft = -130; _target.OffsetRight = 130; _target.OffsetTop = 12;
+        _safe.AddChild(_target);
+    }
+
+    // The hotbar and the window menu, centred just above the status bar.
+    private void BuildHotbar()
+    {
+        var panel = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 1, AnchorBottom = 1,
+            OffsetTop = -(BarH + HotH - 4), OffsetBottom = -(BarH + 4), GrowHorizontal = GrowDirection.Both,
+        };
+        panel.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336d8", "#6a5530", 2, 4));
+        var hotbar = Ui.HBox(5);
+        hotbar.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        _hotbar = hotbar;
+        var menu = Menu(3);
+        menu.CustomMinimumSize = new Vector2(250, 0);
+        panel.AddChild(Ui.HBox(12).With(hotbar, menu));
         _safe.AddChild(panel);
-        var v = Ui.VBox(7);
-        panel.AddChild(v);
-        v.With(_name, _class, _buffs, Row("HP", _hp), Row("MP", _mp), Row("EXP", _exp), _gold);
-        v.With(_target, _zone, _minimap, _coords);
-        var menu = Menu(2);
-        menu.SizeFlagsVertical = SizeFlags.ShrinkEnd | SizeFlags.Expand;
-        v.AddChild(menu);
+
+        // While the chat is shut, new lines show here for a few seconds and fade.
+        _feed = new VBoxContainer
+        {
+            AnchorTop = 1, AnchorBottom = 1, OffsetLeft = 12, OffsetTop = -(BarH + HotH + 8), OffsetBottom = -(BarH + HotH + 8),
+            GrowVertical = GrowDirection.Begin, MouseFilter = MouseFilterEnum.Ignore, CustomMinimumSize = new Vector2(460, 0),
+        };
+        _feed.AddThemeConstantOverride("separation", 1);
+        _safe.AddChild(_feed);
+    }
+
+    // The zone map, a see-through pop-out in the top-right corner that turns solid under the mouse.
+    private void BuildMap()
+    {
+        _mapPanel = new PanelContainer { AnchorLeft = 1, AnchorRight = 1, OffsetLeft = -(MapW + 12), OffsetRight = -12, OffsetTop = 12 };
+        _mapPanel.AddThemeStyleboxOverride("panel", Ui.Box("#1e233690", "#6a5530", 2, 6));
+        _zone.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _zone.ClipText = true;
+        _mapBtn = new Button { Text = "–", Flat = true, FocusMode = FocusModeEnum.None, TooltipText = "Hide the map (N)" };
+        _mapBtn.Pressed += ToggleMap;
+        _minimap.CustomMinimumSize = new Vector2(0, 170);
+        _mapBody = Ui.VBox(3).With(_minimap, _coords);
+        _mapPanel.AddChild(Ui.VBox(3).With(Ui.HBox(4).With(_zone, _mapBtn), _mapBody));
+        _safe.AddChild(_mapPanel);
+    }
+
+    // The chat panel opens down the right-hand side, under the map.
+    private void BuildChat()
+    {
+        _chatPanel = new PanelContainer
+        {
+            AnchorLeft = 1, AnchorRight = 1, AnchorBottom = 1, OffsetLeft = -(ChatW + 12), OffsetRight = -12,
+            OffsetBottom = -(BarH + HotH), Visible = false,
+        };
+        _chatPanel.AddThemeStyleboxOverride("panel", Ui.Box("#151827e8", "#6a5530", 2, 6));
+        var title = Ui.Label("Chat", Ui.GoldHi, 14);
+        title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        var close = new Button { Text = "×", Flat = true, FocusMode = FocusModeEnum.None, TooltipText = "Hide the chat" };
+        close.Pressed += ToggleChat;
+        _chatPanel.AddChild(Ui.VBox(4).With(Ui.HBox().With(title, close), _chat, ChatInput));
+        _safe.AddChild(_chatPanel);
+    }
+
+    public void ToggleChat() => SetChat(!ChatOpen);
+
+    // Enter: open the chat if it's shut and start typing.
+    public void FocusChat()
+    {
+        SetChat(true);
+        ChatInput.CallDeferred(Control.MethodName.GrabFocus);
+    }
+
+    private void SetChat(bool open)
+    {
+        if (Ui.Touch || open == ChatOpen) return; // phones always show their chat
+        ChatOpen = _chatPanel.Visible = open;
+        if (open)
+        {
+            _unreadCount = 0;
+            _unread.Visible = false;
+            foreach (var c in _feed.GetChildren()) c.QueueFree();
+            _chat.CallDeferred(RichTextLabel.MethodName.ScrollToLine, Math.Max(0, _chat.GetLineCount() - 1));
+        }
+        else ChatInput.ReleaseFocus();
+        Audio.Play("ui");
+    }
+
+    public void ToggleMap()
+    {
+        if (Ui.Touch) return;
+        _mapBody.Visible = !_mapBody.Visible;
+        _mapBtn.Text = _mapBody.Visible ? "–" : "+";
+        _mapBtn.TooltipText = _mapBody.Visible ? "Hide the map (N)" : "Show the map (N)";
+        _mapPanel.ResetSize();
     }
 
     // Phones: small panels in the top corners, the on-screen controls along the bottom and the chat between them.
@@ -208,24 +331,6 @@ public partial class Hud : Control
         return h.With(l, bar);
     }
 
-    private void BuildBottom()
-    {
-        var bottom = Ui.VBox(4);
-        bottom.AnchorTop = 1; bottom.AnchorBottom = 1; bottom.AnchorRight = 1;
-        bottom.OffsetTop = -BottomH; bottom.OffsetRight = -SideW - 4;
-        _safe.AddChild(bottom);
-        var hotPanel = new PanelContainer();
-        hotPanel.AddThemeStyleboxOverride("panel", Ui.Box("#1e2336f2", "#6a5530", 2, 4));
-        var hotbar = Ui.HBox(5);
-        hotbar.Alignment = BoxContainer.AlignmentMode.Center;
-        _hotbar = hotbar;
-        hotPanel.AddChild(hotbar);
-        var chatPanel = new PanelContainer { SizeFlagsVertical = SizeFlags.ExpandFill };
-        chatPanel.AddThemeStyleboxOverride("panel", Ui.Box("#151827f2", "#6a5530", 2, 5));
-        chatPanel.AddChild(Ui.VBox(3).With(_chat, ChatInput));
-        bottom.With(hotPanel, chatPanel);
-    }
-
     // ---- events -------------------------------------------------------------------------
     public void OnEvent(GameEvent e)
     {
@@ -261,7 +366,32 @@ public partial class Hud : Control
         var col = ChannelColors.GetValueOrDefault(channel, "#d8d4c4");
         string prefix = channel switch { "shout" => "[lb]Shout] ", "whisper" => "[lb]Whisper] ", _ => "" };
         string who = from != "" ? $"[color=#ffffff]{prefix}{Esc(from)}:[/color] " : prefix;
-        _chat.AppendText($"[color={col}]{who}{Esc(text)}[/color]\n");
+        string line = $"[color={col}]{who}{Esc(text)}[/color]";
+        _chat.AppendText(line + "\n");
+        if (Ui.Touch || ChatOpen) return;
+        _unreadCount++;
+        _unread.Text = _unreadCount > 99 ? "99+" : _unreadCount.ToString();
+        _unread.Visible = true;
+        var shown = new RichTextLabel { BbcodeEnabled = true, FitContent = true, ScrollActive = false, MouseFilter = MouseFilterEnum.Ignore, Text = line };
+        shown.AddThemeFontSizeOverride("normal_font_size", 14);
+        shown.AddThemeConstantOverride("outline_size", 4);
+        shown.AddThemeColorOverride("font_outline_color", Colors.Black);
+        shown.SetMeta("at", Time.GetTicksMsec());
+        _feed.AddChild(shown);
+        while (_feed.GetChildCount() > 5) _feed.GetChild(0).Free();
+    }
+
+    // Lines in the feed stay six seconds, then fade over one.
+    private void FadeFeed()
+    {
+        ulong now = Time.GetTicksMsec();
+        foreach (var c in _feed.GetChildren())
+        {
+            if (c is not RichTextLabel l) continue;
+            float age = (now - l.GetMeta("at").AsUInt64()) / 1000f;
+            if (age > 7) l.QueueFree();
+            else l.Modulate = new Color(1, 1, 1, Mathf.Clamp(7 - age, 0, 1));
+        }
     }
 
     // ---- per frame ----------------------------------------------------------------------
@@ -285,11 +415,16 @@ public partial class Hud : Control
         _statsBtn.Text = p.Unspent > 0 ? $"{stats} +{p.Unspent}" : stats;
         _statsBtn.AddThemeColorOverride("font_color", p.Unspent > 0 ? Ui.GoldHi : Ui.Ink);
         if (Ui.Touch) { _buffs.Visible = _buffs.Text != ""; FitScreen(); }
+        else
+        {
+            bool overMap = _mapPanel.GetGlobalRect().HasPoint(GetGlobalMousePosition());
+            _mapPanel.Modulate = new Color(1, 1, 1, overMap ? 1 : 0.72f);
+            _chatPanel.OffsetTop = _mapPanel.Position.Y + _mapPanel.Size.Y + 8;
+            FadeFeed();
+        }
 
         var t = W.GetTarget();
-        _target.Visible = !Ui.Touch || t != null; // phones have no room for an empty target box
-        _tEmpty.Visible = t == null;
-        _tName.Visible = _tLevel.Visible = _tBar.Visible = _tStatus.Visible = t != null;
+        _target.Visible = t != null;
         if (t != null)
         {
             _tName.Text = t.D.Name;
@@ -306,7 +441,7 @@ public partial class Hud : Control
             _bannerT -= dt;
             _banner.Modulate = new Color(1, 1, 1, (float)Math.Clamp(Math.Min(_bannerT, 3 - _bannerT) * 2, 0, 1));
             _banner.Size = new Vector2(_windows.Size.X, 80);
-            _banner.Position = new Vector2(0, 50);
+            _banner.Position = new Vector2(0, Ui.Touch ? 50 : 110); // below the target box
         }
         else _banner.Modulate = Colors.Transparent;
 
@@ -432,7 +567,7 @@ public partial class Hud : Control
         if (_open.ContainsKey(id)) { Close(id); return; }
         switch (id)
         {
-            case "inventory": Open(id, "Inventory", RenderInventory, right: true); break;
+            case "inventory": Open(id, "Inventory", RenderInventory, right: true); StatsBesideBag(); break;
             case "stats": Open(id, "Character", RenderStats); break;
             case "skills": Open(id, "Skills", RenderSkills); break;
             case "quests": Open(id, "Quest Log", RenderQuests); break;
@@ -440,14 +575,25 @@ public partial class Hud : Control
         }
     }
 
-    private void Open(string id, string title, Action<VBoxContainer> render, bool right = false, int width = 330, float top = 12)
+    // Opening the bag also opens the character sheet just to its left, unless trading needs that room.
+    private void StatsBesideBag()
+    {
+        var bag = _open["inventory"];
+        float x = bag.Position.X - WinW - 8;
+        if (x < 12 || _shopId != null || _open.ContainsKey("storage")) return;
+        if (!_open.ContainsKey("stats")) { Open("stats", "Character", RenderStats); _statsWithBag = true; }
+        _open["stats"].Position = new Vector2(x, bag.Position.Y);
+    }
+
+    private void Open(string id, string title, Action<VBoxContainer> render, bool right = false, int width = WinW, float top = 12)
     {
         Close(id);
         var win = new GameWindow(title, () => Close(id)) { Render = render };
         win.CustomMinimumSize = new Vector2(width, 0);
         _windows.AddChild(win);
         if (Ui.Touch) top = 4; // short screens need all the height they have
-        win.Position = new Vector2(right ? Math.Max(12, _windows.Size.X - width - 12) : 12, top);
+        float edge = _windows.Size.X - (ChatOpen ? ChatW + 12 : 0); // keep clear of an open chat
+        win.Position = new Vector2(right ? Math.Max(12, edge - width - 12) : 12, top);
         win.ZIndex = 0;
         win.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true }) win.MoveToFront(); };
         _open[id] = win;
@@ -461,12 +607,20 @@ public partial class Hud : Control
         win.QueueFree();
         if (id == "dialog") _dialogNpc = null;
         if (id == "shop") _shopId = null;
+        if (id == "stats") _statsWithBag = false;
+        if (id == "inventory" && _statsWithBag) Close("stats");
     }
 
+    // Esc: shut the top window, or failing that the chat.
     public bool CloseTop()
     {
         var top = _open.Values.OrderByDescending(w => w.GetIndex()).FirstOrDefault();
-        if (top == null) return false;
+        if (top == null)
+        {
+            if (!ChatOpen) return false;
+            SetChat(false);
+            return true;
+        }
         Close(_open.First(kv => kv.Value == top).Key);
         return true;
     }
@@ -748,9 +902,9 @@ public partial class Hud : Control
             ("Tab / click", "Select a target. Spells need a target in range. Esc clears it."),
             ("1 – 8", "Class skills, unlocked from level 5. Pick which key each one sits on in the Skills window (K)."),
             ("9 / 0", "Drink your best healing tonic / mana tea."),
-            ("I · C · K · Q", "Inventory · Character stats · Skills · Quest log"),
-            ("Enter", "Chat. /s shout, /w name message to whisper, /who"),
-            ("M · H", "Toggle music · This help"),
+            ("I · C · K · Q", "Inventory (with your stats beside it) · Character stats · Skills · Quest log"),
+            ("Enter", "Open the chat (or click the speech bubble, bottom right). /s shout, /w name message to whisper, /who"),
+            ("M · N · H", "Toggle music · Hide or show the map · This help"),
         })
         {
             var desc = Ui.Label(v, null, 14, true);
@@ -955,7 +1109,28 @@ public partial class GameWindow : PanelContainer
     }
 }
 
-// The zone map in the side panel: tiles as coloured pixels plus live dots.
+// A speech bubble with three dots, drawn for the chat button.
+public partial class ChatIcon : Control
+{
+    public ChatIcon() => MouseFilter = MouseFilterEnum.Ignore;
+
+    public override void _Draw()
+    {
+        var r = new Rect2(Size.X * 0.2f, Size.Y * 0.2f, Size.X * 0.6f, Size.Y * 0.44f);
+        var bubble = new StyleBoxFlat { BgColor = Ui.Ink };
+        bubble.SetCornerRadiusAll(6);
+        DrawStyleBox(bubble, r);
+        DrawColoredPolygon(new[]
+        {
+            new Vector2(r.Position.X + r.Size.X * 0.22f, r.End.Y - 1), new Vector2(r.Position.X + r.Size.X * 0.48f, r.End.Y - 1),
+            new Vector2(r.Position.X + r.Size.X * 0.14f, r.End.Y + Size.Y * 0.16f),
+        }, Ui.Ink);
+        for (int i = 0; i < 3; i++)
+            DrawCircle(new Vector2(r.Position.X + r.Size.X * (0.27f + 0.23f * i), r.Position.Y + r.Size.Y / 2), 2.2f, Assets.C("#2c3352"));
+    }
+}
+
+// The zone map in its pop-out panel: tiles as coloured pixels plus live dots.
 public partial class Minimap : Control
 {
     public World? W;
