@@ -31,7 +31,7 @@ timers/tooltip_delay_sec=0.25
 
 [kotw]
 
-server_url="http://localhost:5080"
+server_url="http://127.0.0.1:5080"
 
 [rendering]
 

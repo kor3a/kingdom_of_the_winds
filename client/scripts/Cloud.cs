@@ -31,8 +31,9 @@ public partial class Cloud : Node
     private static string AccountPath => ProjectSettings.GlobalizePath("user://account.json");
 
     // The address comes from project.godot (kotw/server_url) or `-- --server=<url>` on the command line.
+    // 127.0.0.1 rather than localhost: Godot tries IPv6 ::1 first, which Docker doesn't publish, and times out there.
     private static readonly string Server = (OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--server="))?[9..]
-        ?? ProjectSettings.GetSetting("kotw/server_url", "http://localhost:5080").AsString()).TrimEnd('/');
+        ?? ProjectSettings.GetSetting("kotw/server_url", "http://127.0.0.1:5080").AsString()).TrimEnd('/');
 
     public override void _Ready()
     {

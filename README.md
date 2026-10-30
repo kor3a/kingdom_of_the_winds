@@ -22,7 +22,7 @@ The title screen asks players to log in or create an account (email and password
 
 The account server is in `server/`: ASP.NET Core with PostgreSQL (Npgsql and Dapper). It creates its tables on start. Passwords are stored as salted PBKDF2 hashes, logins are random tokens kept for 90 days from last use (only a hash of each is stored), and each address gets ten login tries a minute.
 
-To run it on your computer with Docker Desktop, copy `.env.example` to `.env` and set a database password in it, then start PostgreSQL and the server together. The server listens on `http://localhost:5080`, which the client uses by default:
+To run it on your computer with Docker Desktop, copy `.env.example` to `.env` and set a database password in it, then start PostgreSQL and the server together. The server listens on `http://127.0.0.1:5080`, which the client uses by default (not `localhost`, which Godot tries over IPv6 first, where Docker isn't listening):
 
 ```bash
 docker compose up -d --build
