@@ -121,7 +121,7 @@ tools/ArtGen/  Draws all the pixel art and synthesizes the sound effects and mus
 
 There are 64 quests: the 29-step storyline, side quests in every zone, and a trial for each class. Each field zone has a camp with a shrine circle, and teleport scrolls carry you between the three towns.
 
-**Classes.** At level 5 choose Warrior, Rogue, Mystic, Monk, Hunter (bow, attacks from 5 tiles) or Shaman (curses and life drain). At level 48 your job master sets a trial; pass it and at level 50 you advance to Warlord, Shadowblade, Stormcaller, Lotus Saint, Windstrider or Grand Shaman, keeping every base skill. Each class line has 13 skills, including lines, dashes, chain spells, knockback, life drain, execute, barriers, curses and roots. Pick which eight sit on the hotbar in the Skills window (K).
+**Classes.** At level 5 choose Warrior, Rogue, Mystic, Monk, Hunter (bow, attacks from 5 tiles) or Shaman (curses and life drain). At level 48 your job master sets a trial; pass it and at level 50 you advance to Warlord, Shadowblade, Stormcaller, Lotus Saint, Windstrider or Grand Shaman, keeping every base skill. Each class line has 13 skills, including lines, dashes, leaps that land with a shockwave, chain spells, repeated lightning strikes, knockback, pulls that drag foes in, life drain, execute, barriers, berserk rage, damage reflection, curses and roots. Every skill has its own pixel-art picture on the hotbar and in the Skills window. Pick which eight sit on the hotbar in the Skills window (K).
 
 ## Art
 

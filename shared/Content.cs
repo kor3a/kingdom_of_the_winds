@@ -38,14 +38,15 @@ public sealed class ClassDef
 }
 
 // Melee: the foe in reach. Around: every foe within Radius (1 if unset). Target: a foe in Range,
-// plus everyone within Radius of it and up to Chain more nearby. Line: every foe in a straight
-// line ahead, up to Range. Dash: leap next to a foe in Range, then strike. Self: buffs and heals.
+// plus everyone within Radius of it and up to Chain more nearby, struck Hits times. Line: every foe
+// in a straight line ahead, up to Range. Dash: leap next to a foe in Range, then strike it and
+// everyone within Radius of it. Self: buffs and heals.
 public enum SkillType { Melee, Around, Target, Self, Ghost, Line, Dash }
 
 public sealed class SkillDef
 {
-    public required string Id, Cls, Name, Glyph, Color, Desc;
-    public int Level, Mp, Hits = 1, Range, Radius, Chain, Knock;
+    public required string Id, Cls, Name, Color, Desc;
+    public int Level, Mp, Hits = 1, Range, Radius, Chain, Knock, Pull; // Pull: drag foes up to this many tiles toward you
     public double Cd, Mult = 1, BehindMult, Power, Dur, Drain, Execute;
     public bool Phys; // Target and Line skills: roll with attack power (arrows) instead of magic
     public SkillType Type;

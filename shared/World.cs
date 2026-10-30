@@ -6,12 +6,13 @@ namespace KotW.Shared;
 public sealed class World
 {
     private const double PlayerStep = 0.19, GhostStep = 0.12;
-    private static readonly Dictionary<string, string> BuffLabels = new()
+    // Names for the effects skills leave on the player, as the status line and "wore off" messages show them.
+    public static readonly Dictionary<string, string> BuffLabels = new()
     {
-        ["guard"] = "Taunt guard", ["warcry"] = "War Cry", ["stealth"] = "Your cover", ["blessing"] = "Blessing",
-        ["banner"] = "War Banner", ["ironskin"] = "Iron Skin", ["barrier"] = "Your barrier", ["focus"] = "Focus",
+        ["guard"] = "Guard", ["warcry"] = "War Cry", ["stealth"] = "Stealth", ["blessing"] = "Blessing",
+        ["banner"] = "Banner", ["ironskin"] = "Iron Skin", ["barrier"] = "Barrier", ["focus"] = "Focus",
         ["haste"] = "Haste", ["manashield"] = "Mana Shield", ["surge"] = "Surge", ["regen"] = "Spring of Life",
-        ["sanctuary"] = "Sanctuary", ["avatar"] = "Avatar of Mercy",
+        ["sanctuary"] = "Sanctuary", ["avatar"] = "Avatar of Mercy", ["berserk"] = "Bloodlust", ["fortress"] = "Iron Mountain",
     };
 
     public readonly Dictionary<string, GameMap> Maps;
@@ -527,6 +528,7 @@ public sealed class World
         var r = Rules.RollMonsterHit(m.D, Pd, mult, P.Buffs.ContainsKey("guard"), unavoidable);
         if (r.Miss) { Number(P.X, P.Y, "dodge", "miss"); return; }
         HurtPlayer(r.Dmg);
+        if (P.Buffs.ContainsKey("fortress") && !P.Ghost) HurtMonster(m, Math.Max(1, (int)Math.Round(r.Dmg * 0.3)), false);
     }
 
     public void HurtPlayer(int dmg)
@@ -567,8 +569,8 @@ public sealed class World
         foreach (var m in Monsters) m.State = "idle";
         Fx("death", P.X, P.Y);
         Sfx("die");
-        bool canRes = LearnedSkills().Contains("resurrect");
-        Msg($"You have fallen and lost {loss} EXP. As a ghost, walk to a shrine's golden circle to return to life{(canRes ? ", or pray with Resurrect" : "")}.", "warn");
+        var res = LearnedSkills().Select(id => Content.Skills[id]).FirstOrDefault(s => s.Type == SkillType.Ghost);
+        Msg($"You have fallen and lost {loss} EXP. As a ghost, walk to a shrine's golden circle to return to life{(res != null ? $", or pray with {res.Name}" : "")}.", "warn");
     }
 
     private void Revive(double frac)
@@ -757,6 +759,7 @@ public sealed class World
             default: m.Status[s.Effect] = new StatusEffect { T = s.Dur }; break;
         }
         if (s.Knock > 0) Knock(m, s.Knock);
+        if (s.Pull > 0) Pull(m, s.Pull);
     }
 
     // Shoves a foe straight away from the player until it hits something.
@@ -767,6 +770,18 @@ public sealed class World
         var (dx, dy) = dir.Vec();
         for (int i = 0; i < tiles; i++)
         {
+            if (!IsFree(m.X + dx, m.Y + dy, true)) break;
+            m.Place(m.X + dx, m.Y + dy);
+        }
+    }
+
+    // Drags a foe toward the player one step at a time, stopping beside them or at anything in the way.
+    private void Pull(Monster m, int tiles)
+    {
+        if (m.D.Boss) return;
+        for (int i = 0; i < tiles && m.Manhattan(P) > 1; i++)
+        {
+            var (dx, dy) = DirX.Of(P.X - m.X, P.Y - m.Y).Vec();
             if (!IsFree(m.X + dx, m.Y + dy, true)) break;
             m.Place(m.X + dx, m.Y + dy);
         }
@@ -826,11 +841,19 @@ public sealed class World
                 Target = m.Id;
                 bool forceCrit = BreakStealth();
                 double mult = s.BehindMult > 0 && IsBehind(m) ? s.BehindMult : s.Mult;
+                // A leap with a Radius lands with a shockwave that also strikes everyone beside the foe.
+                var splash = s.Type == SkillType.Dash && s.Radius > 0 ? Monsters.Where(o => o != m && o.Chebyshev(m) <= s.Radius).ToList() : null;
+                if (splash != null)
+                {
+                    Fx("nova", m.X, m.Y, e => { e.R = s.Radius; e.Color = s.Color; });
+                    Sfx("nova");
+                }
                 for (int i = 0; i < s.Hits; i++)
                 {
                     int hit = i;
                     Later(i * 0.12, () =>
                     {
+                        if (splash != null) foreach (var o in splash) SkillHit(o, s, pd, s.Mult, false, "hit");
                         if (m.Hp <= 0) return;
                         Fx("slash", m.X, m.Y, e => { e.Dir = P.Facing; e.Color = s.Color; });
                         SkillHit(m, s, pd, mult, forceCrit && hit == 0);
@@ -892,19 +915,28 @@ public sealed class World
                 if (s.Chain > 0)
                     victims.AddRange(Monsters.Where(o => o != m && !victims.Contains(o) && o.Manhattan(m) <= 4)
                         .OrderBy(o => o.Manhattan(m)).Take(s.Chain));
-                Fx(s.Fx, m.X, m.Y, e => { e.FromX = P.X; e.FromY = P.Y; e.R = s.Radius; e.Color = s.Color; });
-                var prev = m;
-                foreach (var v in victims.Where(v => v != m && v.Chebyshev(m) > s.Radius))
+                int cx = m.X, cy = m.Y; // later strikes still land where the first one did
+                for (int i = 0; i < s.Hits; i++)
                 {
-                    var from = prev;
-                    Fx(s.Fx, v.X, v.Y, e => { e.FromX = from.X; e.FromY = from.Y; e.Color = s.Color; });
-                    prev = v;
+                    int hit = i;
+                    Later(i * 0.4, () =>
+                    {
+                        if (!victims.Any(Monsters.Contains)) return; // all dead, or the player left the map
+                        Fx(s.Fx, cx, cy, e => { e.FromX = P.X; e.FromY = P.Y; e.R = s.Radius; e.Color = s.Color; });
+                        var prev = m;
+                        foreach (var v in victims.Where(v => v != m && v.Chebyshev(m) > s.Radius))
+                        {
+                            var from = prev;
+                            Fx(s.Fx, v.X, v.Y, e => { e.FromX = from.X; e.FromY = from.Y; e.Color = s.Color; });
+                            prev = v;
+                        }
+                        Sfx(s.Fx);
+                        Later(s.Fx is "fire" or "ice" or "arrow" or "spirit" or "drain" ? 0.18 : 0.05, () =>
+                        {
+                            foreach (var v in victims) SkillHit(v, s, pd, s.Power, forceCrit && hit == 0, s.Phys ? "hit" : "spell");
+                        });
+                    });
                 }
-                Sfx(s.Fx);
-                Later(s.Fx is "fire" or "ice" or "arrow" or "spirit" or "drain" ? 0.18 : 0.05, () =>
-                {
-                    foreach (var v in victims) SkillHit(v, s, pd, s.Power, forceCrit, s.Phys ? "hit" : "spell");
-                });
                 break;
             }
             case SkillType.Self:
