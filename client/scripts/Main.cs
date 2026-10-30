@@ -215,11 +215,11 @@ public partial class Main : Node2D
             (3.4, () => { w.CycleTarget(); var t = w.GetTarget(); if (t != null) { w.P.Place(t.X, t.Y - 1); if (!w.Map.Walkable(t.X, t.Y - 1)) w.P.Place(t.X - 1, t.Y); } }),
             (3.6, () => w.UseHotbar(0)),
             (3.75, () => Shot("3_fields_combat")),
-            (3.8, () => { _hud.Toggle("inventory"); _hud.Toggle("stats"); }),
+            (3.8, () => _hud.Toggle("inventory")),
             (4.4, () => Shot("4_windows")),
-            (4.5, () => { _hud.CloseTop(); _hud.CloseTop(); w.EnterMap("forest", 25, 8, Dir.Up); }),
+            (4.5, () => { _hud.CloseTop(); _hud.CloseTop(); _hud.ToggleChat(); w.EnterMap("forest", 25, 8, Dir.Up); }),
             (5.3, () => Shot("5_forest")),
-            (5.4, () => w.EnterMap("cave", 20, 14, Dir.Up)),
+            (5.4, () => { _hud.ToggleChat(); w.EnterMap("cave", 20, 14, Dir.Up); }),
             (6.4, () => Shot("6_cave")),
             (6.5, () => { w.HurtPlayer(99999); w.EnterMap("town", 19, 9, Dir.Up); w.P.Ghost = true; }),
             (7.3, () => Shot("7_ghost")),
@@ -284,13 +284,14 @@ public partial class Main : Node2D
             case Key.Space: if (!k.Echo) _attackFresh = true; _attack = true; break;
             case Key.Tab: _world.CycleTarget(); break;
             case Key.Escape: if (!_hud.CloseTop()) _world.ClearTarget(); break;
-            case Key.Enter: case Key.KpEnter: _hud.ChatInput.GrabFocus(); break;
+            case Key.Enter: case Key.KpEnter: _hud.FocusChat(); break;
             case Key.I: _hud.Toggle("inventory"); break;
             case Key.C: _hud.Toggle("stats"); break;
             case Key.K: _hud.Toggle("skills"); break;
             case Key.Q: case Key.L: _hud.Toggle("quests"); break;
             case Key.H: _hud.Toggle("help"); break;
             case Key.M: _hud.ToggleMusic(); break;
+            case Key.N: _hud.ToggleMap(); break;
             default: return;
         }
         GetViewport().SetInputAsHandled();
