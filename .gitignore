@@ -8,6 +8,7 @@ tools/ArtGen/preview.png
 tools/ArtGen/preview_gear.png
 tools/ArtGen/preview_monsters.png
 tools/ArtGen/preview_maps.png
+tools/ArtGen/preview_skills.png
 # iOS and other exports
 build/
 # Server secrets (see .env.example)

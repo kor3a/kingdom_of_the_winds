@@ -102,10 +102,11 @@ public static class Rules
         if (Has("warcry")) atk *= 1.3;
         if (Has("blessing")) { atk *= 1.1; def = def * 1.3 + 3; }
         if (Has("banner")) { atk *= 1.2; def *= 1.2; }
-        if (Has("ironskin")) def *= 1.6;
+        if (Has("ironskin") || Has("fortress")) def *= 1.6;
+        if (Has("berserk")) { atk *= 1.4; def *= 0.8; }
         if (Has("surge")) matk *= 1.4;
         if (Has("avatar")) { matk *= 1.3; def *= 1.3; }
-        bool haste = Has("haste");
+        bool haste = Has("haste") || Has("berserk");
         return new Derived
         {
             Stats = s,

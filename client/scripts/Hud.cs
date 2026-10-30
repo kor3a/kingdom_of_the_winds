@@ -402,8 +402,7 @@ public partial class Hud : Control
         var cls = Content.Classes[p.Cls ?? "none"];
         _class.Text = $"Lv {p.Level} {cls.Name}{(p.Ghost ? " · Ghost" : "")}";
         _class.AddThemeColorOverride("font_color", p.Ghost ? Assets.C("#b8c8ff") : Assets.C(cls.Color));
-        var buffNames = new Dictionary<string, string> { ["guard"] = "挑 Guard", ["warcry"] = "吼 War Cry", ["stealth"] = "隱 Veil", ["blessing"] = "福 Blessing" };
-        _buffs.Text = string.Join("  ", p.Buffs.Keys.Select(k => buffNames[k])) + (p.Ghost ? "魂 Ghost" : "");
+        _buffs.Text = p.Ghost ? "Ghost" : string.Join(" · ", p.Buffs.Keys.Select(k => World.BuffLabels.GetValueOrDefault(k, k)));
         _hp.Set(p.Hp, pd.MaxHp, $"{Math.Max(0, (int)p.Hp)} / {pd.MaxHp}");
         _mp.Set(p.Mp, pd.MaxMp, $"{(int)p.Mp} / {pd.MaxMp}");
         int need = Rules.ExpToNext(p.Level);
@@ -491,11 +490,9 @@ public partial class Hud : Control
                     var sk = Content.Skills[s];
                     b.AddThemeStyleboxOverride("normal", Ui.Box(sk.Color, "#1a1410", 2, 0));
                     b.AddThemeStyleboxOverride("hover", Ui.Box(sk.Color, "#f4d88a", 2, 0));
-                    b.Text = sk.Glyph;
-                    b.AddThemeFontSizeOverride("font_size", 22);
-                    b.AddThemeColorOverride("font_color", Colors.White);
-                    b.AddThemeConstantOverride("outline_size", 4);
-                    b.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.6f));
+                    b.Icon = Assets.SkillIcon(sk.Id);
+                    b.IconAlignment = HorizontalAlignment.Center;
+                    b.VerticalIconAlignment = VerticalAlignment.Center;
                     b.TooltipText = SkillTip(sk);
                 }
                 else b.Disabled = true;
@@ -823,13 +820,11 @@ public partial class Hud : Control
         foreach (var s in Content.Skills.Values.Where(s => line.Contains(s.Cls)).OrderBy(s => s.Level))
         {
             bool has = learned.Contains(s.Id);
-            var glyph = Ui.Label(s.Glyph, Colors.White, 22);
-            glyph.CustomMinimumSize = new Vector2(38, 38);
-            glyph.HorizontalAlignment = HorizontalAlignment.Center;
-            glyph.VerticalAlignment = VerticalAlignment.Center;
-            var bg = new PanelContainer();
+            var icon = new TextureRect { Texture = Assets.SkillIcon(s.Id), StretchMode = TextureRect.StretchModeEnum.KeepCentered };
+            icon.CustomMinimumSize = new Vector2(Assets.SkillIconSize, Assets.SkillIconSize);
+            var bg = new PanelContainer { SizeFlagsVertical = SizeFlags.ShrinkBegin };
             bg.AddThemeStyleboxOverride("panel", Ui.Box(s.Color, "#1a1410", 2, 0));
-            bg.AddChild(glyph);
+            bg.AddChild(icon);
             string where = has ? "" : s.Cls == adv?.Id ? $"  · {adv.Name} at level {s.Level}" : $"  · learn at level {s.Level}";
             var info = Ui.VBox(1).With(Ui.Label(s.Name + where, has ? Colors.White : Ui.Muted),
                 Ui.Label($"{s.Mp} MP · {s.Cd}s · {s.Desc}", Ui.Muted, 13, true));

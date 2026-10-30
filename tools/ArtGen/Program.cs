@@ -37,6 +37,8 @@ foreach (var id in Monsters.All.Keys) Monsters.Strip(id).Save(Path.Combine(art, 
 
 Icons.Atlas(out var order).Save(Path.Combine(art, "icons.png"));
 File.WriteAllLines(Path.Combine(art, "icons.txt"), order);
+var skillAtlas = SkillIcons.Atlas();
+skillAtlas.Save(Path.Combine(art, "skills.png"));
 
 Sound.Effects(Path.Combine(audio, "sfx"));
 Sound.Music(Path.Combine(audio, "music", "town.wav"), 293.66, 0.24, 0.5, true, 1, 11);
@@ -96,6 +98,7 @@ for (int i = 0; i < weapons.Count; i++)
             gear.Blit(People.Doll(l, new[] { Dir.Down, Dir.Right, Dir.Up }[r], f), (i * 3 + r) * 33, f * 49);
 }
 Upscale(gear, 4, Pal.Hex("#5f9a44"), Path.Combine(client, "..", "tools", "ArtGen", "preview_gear.png"));
+Upscale(skillAtlas, 3, Pal.Hex("#1a1410"), Path.Combine(client, "..", "tools", "ArtGen", "preview_skills.png"));
 
 // Every zone at a quarter of a tile per pixel-block, with NPCs as gold dots and fixed bosses as red ones.
 const int mapPx = 6;

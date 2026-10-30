@@ -8,7 +8,7 @@ public static class Assets
 {
     public const int T = Content.Tile;
     private static readonly Dictionary<string, Texture2D?> Cache = new();
-    private static Dictionary<string, int>? _iconIndex;
+    private static Dictionary<string, int>? _iconIndex, _skillIndex;
     private static Dictionary<char, int>? _tileRow;
     private static Shader? _tint;
 
@@ -40,6 +40,16 @@ public static class Assets
         _iconIndex ??= Content.Items.Values.Where(i => !i.Hidden).Select((it, i) => (it.Id, i)).ToDictionary(p => p.Id, p => p.i);
         if (!_iconIndex.TryGetValue(itemId, out var idx)) return null;
         return new AtlasTexture { Atlas = Tex("res://art/icons.png"), Region = new Rect2(idx % 8 * 32, idx / 8 * 32, 32, 32) };
+    }
+
+    // Skill pictures are packed in skill order, eight to a row (same order ArtGen uses).
+    public const int SkillIconSize = 40;
+    public static AtlasTexture? SkillIcon(string skillId)
+    {
+        _skillIndex ??= Content.Skills.Keys.Select((id, i) => (id, i)).ToDictionary(p => p.id, p => p.i);
+        if (!_skillIndex.TryGetValue(skillId, out var idx)) return null;
+        const int s = SkillIconSize;
+        return new AtlasTexture { Atlas = Tex("res://art/skills.png"), Region = new Rect2(idx % 8 * s, idx / 8 * s, s, s) };
     }
 
     public static ShaderMaterial Tint(string hex)
